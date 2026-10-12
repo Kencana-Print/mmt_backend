@@ -5,6 +5,7 @@ exports.getBrowseData = async (start, end, cab) => {
         SELECT h.bpe_nomor AS Nomor, h.bpe_tanggal AS Tanggal, h.bpe_po AS NomorPO, 
                h.bpe_cab AS Cab, h.bpe_spk_nomor AS SPK, s.spk_nama AS NamaSPK,
                h.bpe_sup AS Kdsup, u.Sup_nama AS Supplier, h.bpe_jumlah AS Jumlah,
+               h.bpe_finishing AS Finishing,
                h.bpe_ket AS Keterangan
         FROM tbpbpoexternal_hdr h
         LEFT JOIN tspk s ON s.spk_nomor = h.bpe_spk_nomor
@@ -140,8 +141,11 @@ exports.saveBPB = async (data, isUpdate = false, userLogin) => {
             GpAsal, 
             GpTujuan, 
             Keterangan, 
-            JumlahTerima 
+            JumlahTerima,
+            JumlahFinishing
         } = data;
+
+        const finishingBaru = Number(JumlahFinishing) || 0;
 
         const serverTime = new Date();
         const activeUser = userLogin || 'SYSTEM';
@@ -180,18 +184,19 @@ exports.saveBPB = async (data, isUpdate = false, userLogin) => {
                     bpe_gptujuan = ?, 
                     bpe_ket = ?, 
                     bpe_jumlah = ?, 
+                    bpe_finishing = ?, 
                     user_modified = ?, 
                     date_modified = ? 
                 WHERE bpe_nomor = ?`,
-                [Tanggal, NomorSPK, Cabang, Supplier, GpAsal, GpTujuan, Keterangan, JumlahTerima, activeUser, serverTime, Nomor]
+                [Tanggal, NomorSPK, Cabang, Supplier, GpAsal, GpTujuan, Keterangan, JumlahTerima, finishingBaru, activeUser, serverTime, Nomor]
             );
         } else {
             await connection.query(
                 `INSERT INTO tbpbpoexternal_hdr 
                     (bpe_nomor, bpe_tanggal, bpe_po, bpe_spk_nomor, bpe_cab, bpe_sup, 
-                     bpe_gpasal, bpe_gptujuan, bpe_ket, bpe_jumlah, user_create, date_create) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-                [Nomor, Tanggal, NomorPO, NomorSPK, Cabang, Supplier, GpAsal, GpTujuan, Keterangan, JumlahTerima, activeUser, serverTime]
+                     bpe_gpasal, bpe_gptujuan, bpe_ket, bpe_jumlah, bpe_finishing, user_create, date_create) 
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [Nomor, Tanggal, NomorPO, NomorSPK, Cabang, Supplier, GpAsal, GpTujuan, Keterangan, JumlahTerima, finishingBaru, activeUser, serverTime]
             );
         }
 

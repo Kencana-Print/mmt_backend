@@ -12,7 +12,18 @@ router.get("/", bastMapController.getBrowseList);
 // *Catatan: Letakkan sebelum route yang menggunakan parameter `:nomor` agar tidak tertukar*
 router.get("/export-detail", bastMapController.getExportDetail);
 
+// Bahan + nomor proof dari LHK Proof berdasarkan nomor SPK/MAP
+// (dipakai form Baru saat pilih SPK lookup, dan info tambahan form Ubah)
+router.get("/proof/:spk", bastMapController.getProofBySpk);
+
 // Route untuk menghapus BAST (DELETE /api/bast-map/:nomor)
 router.delete("/:nomor", bastMapController.deleteBast);
+
+// Ukuran/size untuk form BAST (GET /api/bast-map/:nomor/sizes)
+// *Wajib di atas GET /:nomor agar tidak tertukar*
+router.get("/:nomor/sizes", bastMapController.getSizes);
+
+// Detail BAST untuk form Ubah (GET /api/bast-map/:nomor)
+router.get("/:nomor", bastMapController.getBastDetail);
 
 module.exports = router;

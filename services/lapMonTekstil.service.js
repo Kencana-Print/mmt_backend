@@ -51,7 +51,8 @@ const lapMonTekstil = async (startDate, endDate) => {
   WHERE spk.spk_tanggal BETWEEN ? AND ?
     AND spk.spk_aktif = 'Y'
     AND spk.spk_divisi = 5
-    AND SUBSTR(spk.spk_nomor, 4, 2) = 'MX'
+    AND (SUBSTR(spk.spk_nomor, 4, 2) = 'MX'
+         OR SUBSTR(spk.spk_nomor, 8, 2) = 'MX')
   ORDER BY spk.spk_tanggal ASC, spk.spk_nomor ASC;
   `;
 

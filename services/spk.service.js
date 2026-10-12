@@ -379,6 +379,10 @@ exports.getSpkForJadwalKirimLookup = async (keyword) => {
                 combined.Jumlah AS Total_Order,
                 CAST(IFNULL(jdwl.total_terjadwal, 0) AS UNSIGNED) AS Sudah_Kirim,
                 CAST(GREATEST(0, combined.Jumlah - IFNULL(jdwl.total_terjadwal, 0)) AS UNSIGNED) AS Belum_Kirim,
+                CASE WHEN combined.Tipe_SPK = 'REGULER'
+                  THEN (SELECT IF(t.spk_close = 1 OR t.spk_aktif <> 'Y', 'Closed', 'Open') FROM tspk t WHERE t.spk_nomor = combined.SPK)
+                  ELSE (SELECT IF(m.mspk_close = 'Y' OR m.mspk_aktif <> 'Y', 'Closed', 'Open') FROM tmemospk m WHERE m.mspk_nomor = combined.SPK)
+                END AS Status_SPK,
                 combined.Tipe_SPK,
                 combined.Ngedit,
                 -- Ringkasan teks kota untuk tampilan lookup
@@ -523,8 +527,8 @@ exports.getSpkDetailSize = async (nomor) => {
 // ===================================
 exports.getSpkDetailByNomor = async (nomor) => {
   try {
-    const sql = `SELECT * FROM (${getBaseSpkQuery("t.spk_nomor = ?")}) AS combined_spk`;
-    const [rows] = await pool.query(sql, [nomor]);
+    const sql = `SELECT * FROM (${getBaseSpkQuery("t.spk_nomor = ?", "m.mspk_nomor = ?")}) AS combined_spk`;
+    const [rows] = await pool.query(sql, [nomor, nomor]);
     if (rows.length === 0)
       throw new Error(`Nomor SPK \${nomor} tidak ditemukan.`);
     return rows[0];
@@ -690,8 +694,9 @@ exports.getMemoSpkLookupData = async (keyword) => {
                 m.mspk_divisi AS Divisi,             
                 m.mspk_nama AS Nama, 
                 m.mspk_nama2 AS Nama2,           -- [DITAMBAHKAN]
-                m.mspk_cab AS Cabang,                
-                m.mspk_workshop AS Workshop,         
+                m.mspk_cab AS Cabang,
+                m.mspk_workshop AS Workshop,
+                m.mspk_sublim AS Sublim,
                 'MEMO' AS Tipe_SPK,
                 IFNULL(m.mspk_panjang, 0) AS Panjang, 
                 IFNULL(m.mspk_lebar, 0) AS Lebar,

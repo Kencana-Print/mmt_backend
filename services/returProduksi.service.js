@@ -83,7 +83,7 @@ exports.getStokByBarcode = async (barcode, gudangAsal) => {
     try {
         const sql = `
             SELECT 
-                m.mst_barcode AS Barcode, 
+                TRIM(REPLACE(m.mst_barcode, '\t', '')) AS Barcode, 
                 m.mst_brg_kode AS Kode, 
                 TRIM(b.brg_nama) AS Nama_Bahan, 
                 b.brg_satuan AS Satuan, 
@@ -93,8 +93,8 @@ exports.getStokByBarcode = async (barcode, gudangAsal) => {
                 SUM(COALESCE(m.mst_stok_in, 0) - COALESCE(m.mst_stok_out, 0)) AS Stok
             FROM tmasterstok_mmt m
             LEFT JOIN tbarang_mmt b ON m.mst_brg_kode = b.brg_kode
-            WHERE m.mst_barcode = ? AND m.mst_gdg_kode = ?
-            GROUP BY m.mst_barcode, m.mst_brg_kode, b.brg_nama, b.brg_satuan
+            WHERE TRIM(REPLACE(m.mst_barcode, '\t', '')) = TRIM(REPLACE(?, '\t', '')) AND m.mst_gdg_kode = ?
+            GROUP BY TRIM(REPLACE(m.mst_barcode, '\t', '')), m.mst_brg_kode, b.brg_nama, b.brg_satuan
             HAVING Stok > 0;
         `;
 
@@ -178,8 +178,9 @@ exports.saveReturProduksi = async (data, isUpdate = false, userLogin) => {
                 // PERBAIKAN 2: Gunakan asalFix di sini
                 [Tanggal, GudangTujuan, asalFix, NomorSPK, Keterangan, Type, activeUser, serverTime, Nomor]
             );
-            // Hapus detail lama
+            // Hapus detail lama + jejak stok lama nomor ini
             await connection.query('DELETE FROM treturminta_mmt_dtl WHERE rmntd_rmnt_nomor = ?', [Nomor]);
+            await connection.query('DELETE FROM tmasterstok_mmt WHERE mst_noreferensi = ?', [Nomor]);
         } else {
             // Insert Header
             await connection.query(
@@ -212,6 +213,64 @@ exports.saveReturProduksi = async (data, isUpdate = false, userLogin) => {
                 (rmntd_rmnt_nomor, rmntd_brg_kode, rmntd_qty, rmntd_expired, rmntd_keterangan, rmntd_nourut, rmntd_gdg_kode, rmntd_barcode, rmntd_panjang, rmntd_lebar) 
                 VALUES ?`, [detailValues]
             );
+
+            // --- MUTASI STOK (tmasterstok_mmt): OUT dari gudang asal + IN ke gudang tujuan ---
+            // Harga (mst_hargabeli / mst_satuan_harga) mengikuti baris barcode sebelumnya.
+            const distinctBarcodes = [...new Set(
+                Details.map((d) => (d.barcode || '').trim()).filter(Boolean)
+            )];
+            const hargaByBarcode = new Map();
+            if (distinctBarcodes.length > 0) {
+                const [hargaRows] = await connection.query(
+                    `SELECT mst_barcode, mst_hargabeli, mst_satuan_harga
+                     FROM tmasterstok_mmt
+                     WHERE mst_barcode IN (?)
+                     ORDER BY mst_tanggal DESC, id DESC`,
+                    [distinctBarcodes]
+                );
+                for (const r of hargaRows) {
+                    if (!hargaByBarcode.has(r.mst_barcode)) {
+                        hargaByBarcode.set(r.mst_barcode, {
+                            hargabeli: r.mst_hargabeli ?? 0,
+                            satuan_harga: r.mst_satuan_harga ?? '',
+                        });
+                    }
+                }
+            }
+
+            for (const d of Details) {
+                const barcodeBersih = (d.barcode || '').trim();
+                const hargaPrev = hargaByBarcode.get(barcodeBersih) || { hargabeli: 0, satuan_harga: '' };
+                const kodeBahan = d.sku;
+                const qtyRetur = Number(d.qty) || 0;
+                const panjangRetur = Number(d.panjang) || 0;
+                const lebarRetur = Number(d.lebar) || 0;
+                const spkRetur = d.spk || '';
+                // OUT gudang asal
+                await connection.query(
+                    `INSERT INTO tmasterstok_mmt
+                        (mst_brg_kode, mst_barcode, mst_gdg_kode, mst_noreferensi, mst_tanggal,
+                         mst_stok_in, mst_stok_out, mst_panjang, mst_lebar, mst_spk_nomor,
+                         mst_hargabeli, mst_satuan_harga, date_create)
+                     VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)`,
+                    [kodeBahan, barcodeBersih, asalFix, Nomor, Tanggal,
+                     qtyRetur, panjangRetur, lebarRetur, spkRetur,
+                     hargaPrev.hargabeli, hargaPrev.satuan_harga, serverTime]
+                );
+                // IN gudang tujuan
+                if (GudangTujuan && GudangTujuan !== asalFix) {
+                    await connection.query(
+                        `INSERT INTO tmasterstok_mmt
+                            (mst_brg_kode, mst_barcode, mst_gdg_kode, mst_noreferensi, mst_tanggal,
+                             mst_stok_in, mst_stok_out, mst_panjang, mst_lebar, mst_spk_nomor,
+                             mst_hargabeli, mst_satuan_harga, date_create)
+                         VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)`,
+                        [kodeBahan, barcodeBersih, GudangTujuan, Nomor, Tanggal,
+                         qtyRetur, panjangRetur, lebarRetur, spkRetur,
+                         hargaPrev.hargabeli, hargaPrev.satuan_harga, serverTime]
+                    );
+                }
+            }
         }
 
         await connection.commit();

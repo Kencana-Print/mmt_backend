@@ -185,6 +185,48 @@ const saveJadwalKirim = async (data, nomorToEdit, userLogin) => {
             currentNomor = await generateNomorKirim(data.Tanggal, connection);
         }
 
+        // 1b. VALIDASI STATUS SPK (server-side, anti-bypass):
+        // SPK close / sudah selesai dijadwalkan tidak boleh dijadwalkan lagi.
+        const spkNomor = (data.No_SPK || '').trim();
+        if (!spkNomor) {
+            throw new Error('Nomor SPK wajib diisi.');
+        }
+        const [[spkReg]] = await connection.query(
+            `SELECT spk_nomor, spk_jumlah, spk_close, spk_aktif FROM tspk WHERE spk_nomor = ? LIMIT 1`,
+            [spkNomor]
+        );
+        const [[spkMemo]] = spkReg ? [[]] : await connection.query(
+            `SELECT mspk_nomor AS spk_nomor, mspk_jumlah AS spk_jumlah, mspk_close AS spk_close, mspk_aktif AS spk_aktif FROM tmemospk WHERE mspk_nomor = ? LIMIT 1`,
+            [spkNomor]
+        );
+        const spkRow = spkReg || spkMemo;
+        if (!spkRow) {
+            throw new Error(`SPK ${spkNomor} tidak ditemukan.`);
+        }
+        // Catatan: tspk.spk_close numerik (0/1), tmemospk.mspk_close char (Y/N)
+        const closeVal = String(spkRow.spk_close ?? '').toUpperCase();
+        const isClosed =
+            closeVal === '1' || closeVal === 'Y' ||
+            String(spkRow.spk_aktif || '').toUpperCase() !== 'Y';
+        if (isClosed) {
+            throw new Error(`SPK ${spkNomor} sudah CLOSE dan tidak bisa dijadwalkan untuk kirim.`);
+        }
+        const orderQty = Number(spkRow.spk_jumlah) || 0;
+        const [terjadwalRows] = await connection.query(
+            `SELECT IFNULL(SUM(Jumlah), 0) AS total FROM tjadwalkirim
+             WHERE spk_nomor = ? ${isUpdating ? 'AND Nomor_Kirim <> ?' : ''}`,
+            isUpdating ? [spkNomor, currentNomor] : [spkNomor]
+        );
+        const sudahTerjadwal = Number(terjadwalRows[0]?.total) || 0;
+        const qtyBaru = Number(data.Jumlah) || 0;
+        if (sudahTerjadwal >= orderQty) {
+            throw new Error(`SPK ${spkNomor} sudah selesai dijadwalkan untuk kirim (sisa 0) dan tidak bisa dijadwalkan lagi.`);
+        }
+        if (sudahTerjadwal + qtyBaru > orderQty) {
+            const sisaOrder = orderQty - sudahTerjadwal;
+            throw new Error(`Gagal Simpan! Jumlah kirim melebihi sisa yang belum dijadwalkan: input ${qtyBaru}, sisa ${sisaOrder} (order SPK ${spkNomor} = ${orderQty}, sudah terjadwal ${sudahTerjadwal}).`);
+        }
+
         // 2. SIMPAN HEADER (tjadwalkirim)
         if (isUpdating) {
             await connection.query(`

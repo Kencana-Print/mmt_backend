@@ -42,32 +42,33 @@ exports.getStokByBarcode = async (barcode, gudangKode) => {
   try {
     const sqlMMT = `
             SELECT 
-    m.mst_barcode AS Barcode, 
+    TRIM(REPLACE(m.mst_barcode, '\t', '')) AS Barcode, 
     m.mst_brg_kode AS Kode, 
     TRIM(b.brg_nama) AS Nama_Bahan, 
     b.brg_satuan AS Satuan, 
     ROUND(SUM(COALESCE(m.mst_stok_in, 0) * m.mst_panjang) - SUM(COALESCE(m.mst_stok_out, 0) * m.mst_panjang), 3) AS Panjang, 
-    (
-        SELECT mst_lebar 
-        FROM tmasterstok_mmt 
-        WHERE mst_barcode = m.mst_barcode 
-        ORDER BY mst_tanggal DESC, id DESC 
-        LIMIT 1
-    ) AS Lebar,
     MAX(m.mst_spk_nomor) AS Nomor_SPK,
     SUM(COALESCE(m.mst_stok_in, 0) - COALESCE(m.mst_stok_out, 0)) AS Stok
 FROM tmasterstok_mmt m
 LEFT JOIN tbarang_mmt b ON m.mst_brg_kode = b.brg_kode
-WHERE m.mst_barcode = ? AND m.mst_gdg_kode = ?
-GROUP BY m.mst_barcode, m.mst_brg_kode, b.brg_nama, b.brg_satuan
+WHERE TRIM(REPLACE(m.mst_barcode, '\t', '')) = TRIM(REPLACE(?, '\t', '')) AND m.mst_gdg_kode = ?
+GROUP BY TRIM(REPLACE(m.mst_barcode, '\t', '')), m.mst_brg_kode, b.brg_nama, b.brg_satuan
 HAVING Stok > 0;
         `;
 
     const [resultsMMT] = await pool.query(sqlMMT, [barcode, gudangKode]);
 
-    // Jika ketemu di MMT, langsung kembalikan
+    // Jika ketemu di MMT, lengkapi Lebar dari baris terbaru (toleran barcode kotor)
     if (resultsMMT.length > 0) {
-      return resultsMMT[0];
+      const row = resultsMMT[0];
+      const [lebarRows] = await pool.query(
+        `SELECT mst_lebar FROM tmasterstok_mmt
+         WHERE TRIM(REPLACE(mst_barcode, '\t', '')) = TRIM(REPLACE(?, '\t', ''))
+         ORDER BY mst_tanggal DESC, id DESC LIMIT 1`,
+        [barcode],
+      );
+      if (lebarRows.length > 0) row.Lebar = lebarRows[0].mst_lebar;
+      return row;
     }
 
     // --- LANGKAH 2: Cari di tabel OBAT (DENGAN mst_aktif) ---

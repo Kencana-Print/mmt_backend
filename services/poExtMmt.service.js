@@ -194,7 +194,10 @@ const getPoDetailForBpb = async (noPo) => {
                    u.Sup_nama, u.Sup_alamat, u.Sup_kota,
                    (SELECT IFNULL(SUM(bh.bpe_jumlah), 0) 
                     FROM tbpbpoexternal_hdr bh 
-                    WHERE bh.bpe_po = h.poe_nomor) AS totalTerima
+                    WHERE bh.bpe_po = h.poe_nomor) AS totalTerima,
+                    (SELECT IFNULL(SUM(bh.bpe_finishing), 0)
+                     FROM tbpbpoexternal_hdr bh
+                     WHERE bh.bpe_po = h.poe_nomor) AS totalFinishing
             FROM tpoexternal_hdr h
             LEFT JOIN tspk s ON s.spk_nomor = h.poe_spk_nomor
             LEFT JOIN tdivisi v ON v.kode = s.spk_divisi

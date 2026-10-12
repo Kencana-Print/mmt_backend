@@ -32,11 +32,11 @@ exports.updateMutasi = async (req, res) => {
 
 exports.getAllMutasi = async (req, res) => {
     try {
-        const { startDate, endDate } = req.query;
+        const { startDate, endDate, search } = req.query;
         if (!startDate || !endDate) {
             return res.status(400).json({ success: false, message: "Filter tanggal (startDate & endDate) diperlukan" });
         }
-        const data = await mutasiService.getMutasiData(startDate, endDate);
+        const data = await mutasiService.getMutasiData(startDate, endDate, search || '');
         res.status(200).json({ success: true, data });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
