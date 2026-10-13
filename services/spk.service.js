@@ -302,6 +302,7 @@ exports.getSpkForStbjLookup = async (keyword) => {
                 t.spk_nomor AS SPK,
                 t.spk_nama AS Nama,
                 t.spk_tanggal AS Tanggal,
+                t.spk_ukuran AS Ukuran,
                 t.spk_jumlah AS Qty_Order,
                 CAST(IFNULL(stbj.total_stbj, 0) AS UNSIGNED) AS Sudah_STBJ,
                 CAST(GREATEST(0, t.spk_jumlah - IFNULL(stbj.total_stbj, 0)) AS UNSIGNED) AS Kurang_STBJ,

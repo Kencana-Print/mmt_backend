@@ -71,6 +71,75 @@ const getProofBySpk = async (req, res, next) => {
   }
 };
 
+// --- SAVE BAST (untuk form Baru & Ubah) ---
+// Service membaca header mspk_*, sedangkan frontend mengirim mmpt_*
+// sehingga dinormalisasi di sini sebelum diteruskan ke service.
+const normalizeSavePayload = (body) => {
+  const data = { ...(body || {}) };
+  const h = { ...(data.header || {}) };
+  data.header = {
+    ...h,
+    mspk_nomor: h.mspk_nomor || h.mmpt_nomor || h.Nomor || "",
+    mspk_jumlah_jadi:
+      h.mspk_jumlah_jadi ?? h.mmpt_jumlah_jadi ?? h.Jumlah ?? 0,
+    mspk_kendala: h.mspk_kendala ?? h.mmpt_kendala ?? h.Kendala ?? "",
+    mspk_tipe: h.mspk_tipe ?? h.mmpt_tipe ?? h.Tipe ?? "",
+  };
+  return data;
+};
+
+const saveBast = async (req, res, next) => {
+  try {
+    const payload = normalizeSavePayload(req.body);
+    if (!payload.header?.mspk_nomor) {
+      return res.status(400).json({
+        success: false,
+        message: "Nomor MAP/Order wajib diisi.",
+      });
+    }
+
+    const userKode =
+      req.user?.kdUser ||
+      req.user?.kode ||
+      req.user?.username ||
+      payload.header?.user ||
+      "SYSTEM";
+    const userCabang =
+      req.user?.cabang ||
+      req.user?.cab ||
+      req.user?.Cab ||
+      req.user?.cabang_kode ||
+      "ALL";
+
+    await bastMapService.saveBastData(payload, userKode, userCabang);
+
+    return res.status(200).json({
+      success: true,
+      message: `BAST ${payload.header.mspk_nomor} berhasil disimpan.`,
+      nomor: payload.header.mspk_nomor,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// --- PRINT BAST (HTML siap cetak, dibuka via window.open) ---
+const printBast = async (req, res, next) => {
+  try {
+    const { nomor } = req.params;
+    const html = await bastMapService.getBastPrintHtml(nomor);
+    if (!html) {
+      return res
+        .status(404)
+        .send(`<h3>Data BAST ${nomor} tidak ditemukan.</h3>`);
+    }
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    return res.status(200).send(html);
+  } catch (error) {
+    next(error);
+  }
+};
+
 // --- DELETE BAST ---
 const deleteBast = async (req, res, next) => {
   try {
@@ -125,6 +194,8 @@ module.exports = {
   getBastDetail,
   getSizes,
   getProofBySpk,
+  saveBast,
+  printBast,
   deleteBast,
   getExportDetail,
 };

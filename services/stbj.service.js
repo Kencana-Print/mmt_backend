@@ -153,10 +153,11 @@ exports.saveSTBJ = async (payload, isUpdate = false, userLogin) => {
         }
 
         // 3. Simpan Detail Utama (Looping menggunakan 'details' dari payload)
+        // Baris ber-SPK disimpan semua (termasuk Jumlah 0); hanya baris kosong dibuang.
         if (details && details.length > 0) {
             for (const item of details) {
                 // Pastikan menggunakan nama field sesuai payload (spk, qty, koli, keterangan)
-                if (item.spk && Number(item.qty) > 0) {
+                if (item.spk && String(item.spk).trim() !== "") {
                     await connection.query(
                         `INSERT INTO tstbj_dtl 
                             (stbjd_stbj_nomor, stbjd_spk_nomor, stbjd_size, stbjd_jumlah, stbjd_koli, stbjd_keterangan, stbjd_packing) 
@@ -251,19 +252,26 @@ exports.getSTBJByNomor = async (nomor) => {
 
         const headerData = headerResults[0];
 
-        // 2. Ambil Data Detail
+        // 2. Ambil Data Detail (+ Total Order & Sudah-STBJ di luar dokumen ini)
         const sqlDetail = `
             SELECT 
                 stbjd_spk_nomor AS spk, 
-                IFNULL(s.spk_nama, i.spgi_nama) AS nama_spk, 
-                s.spk_ukuran AS ukuran, 
+                COALESCE(s.spk_nama, m.mspk_nama, i.spgi_nama) AS nama_spk, 
+                COALESCE(s.spk_ukuran, m.mspk_ukuran) AS ukuran, 
                 stbjd_size AS size,
+                COALESCE(s.spk_jumlah, m.mspk_jumlah, 0) AS Total_Order,
+                IFNULL((
+                    SELECT SUM(x.stbjd_jumlah) FROM tstbj_dtl x
+                    WHERE x.stbjd_spk_nomor = d.stbjd_spk_nomor
+                      AND x.stbjd_stbj_nomor <> d.stbjd_stbj_nomor
+                ), 0) AS Order_Cetak,
                 stbjd_jumlah AS qty, 
                 stbjd_koli AS koli, 
                 stbjd_keterangan AS keterangan,
                 stbjd_packing AS packing
             FROM tstbj_dtl d
             LEFT JOIN tspk s ON s.spk_nomor = d.stbjd_spk_nomor
+            LEFT JOIN tmemospk m ON m.mspk_nomor = d.stbjd_spk_nomor
             LEFT JOIN tspk_gudangitem i ON i.spgi_spk = d.stbjd_spk_nomor
             WHERE d.stbjd_stbj_nomor = ?
             ORDER BY d.stbjd_spk_nomor ASC;

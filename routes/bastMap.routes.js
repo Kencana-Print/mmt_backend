@@ -19,9 +19,19 @@ router.get("/proof/:spk", bastMapController.getProofBySpk);
 // Route untuk menghapus BAST (DELETE /api/bast-map/:nomor)
 router.delete("/:nomor", bastMapController.deleteBast);
 
+// Cetak BAST (GET /api/bast-map/print/:nomor) — HTML siap cetak
+// *Wajib di atas GET /:nomor agar tidak tertukar*
+router.get("/print/:nomor", bastMapController.printBast);
+
 // Ukuran/size untuk form BAST (GET /api/bast-map/:nomor/sizes)
 // *Wajib di atas GET /:nomor agar tidak tertukar*
 router.get("/:nomor/sizes", bastMapController.getSizes);
+
+// Simpan BAST baru (POST /api/bast-map)
+router.post("/", bastMapController.saveBast);
+
+// Update BAST (PUT /api/bast-map/:nomor)
+router.put("/:nomor", bastMapController.saveBast);
 
 // Detail BAST untuk form Ubah (GET /api/bast-map/:nomor)
 router.get("/:nomor", bastMapController.getBastDetail);
