@@ -19,8 +19,10 @@ const getBrowseList = async (req, res, next) => {
       req.user?.Cab ||
       req.user?.cabang_kode ||
       "ALL";
+    // Payload auth memakai 'divisi' (lih. permintaanProduksi.controller).
+    const userDivisi = req.user?.divisi ?? req.user?.Divisi ?? null;
 
-    const data = await bastMapService.getBrowseList(filters, userCabang);
+    const data = await bastMapService.getBrowseList(filters, userCabang, userDivisi);
 
     return res.status(200).json({
       status: true,
@@ -176,8 +178,9 @@ const getExportDetail = async (req, res, next) => {
       req.user?.Cab ||
       req.user?.cabang_kode ||
       "ALL";
+    const userDivisi = req.user?.divisi ?? req.user?.Divisi ?? null;
 
-    const data = await bastMapService.getExportDetail(filters, userCabang);
+    const data = await bastMapService.getExportDetail(filters, userCabang, userDivisi);
 
     return res.status(200).json({
       status: true,

@@ -88,6 +88,7 @@ const suratJalanMapRoutes = require("./routes/suratJalanMap.routes");
 const bastMapRoutes = require("./routes/bastMap.routes");
 const pengajuanKoreksiStokRoutes = require("./routes/pengajuanKoreksiStok.routes");
 const komitmenKirimRoutes = require("./routes/komitmenKirim.routes");
+const relationshipMapMmtRoutes = require("./routes/relationshipMapMmt.routes");
 
 // Konfigurasi
 
@@ -268,6 +269,7 @@ app.use("/api/mmt/surat-jalan-map", clientCertAuth, suratJalanMapRoutes);
 app.use("/api/mmt/bast-map", clientCertAuth, bastMapRoutes);
 app.use("/api/mmt/pengajuan-koreksi-stok", clientCertAuth, pengajuanKoreksiStokRoutes);
 app.use("/api/mmt/komitmen-kirim", clientCertAuth, komitmenKirimRoutes);
+app.use("/api/mmt/relationship-map", clientCertAuth, relationshipMapMmtRoutes);
 
 const port = process.env.PORT || 8003;
 

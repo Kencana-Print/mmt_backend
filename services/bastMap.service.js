@@ -8,8 +8,10 @@ const { format } = require("date-fns");
 //   mspk_cab = 'P05' ATAU UPPER(TRIM(mspk_workshop)) = 'MMT' ATAU mspk_sublim = 'Y'
 // - Cabang lain (selain ALL/HO-/HO/ADMIN/kosong): tampilkan mspk_cab = cabang tsb
 //   (plus baris dengan cab kosong/null agar data lama tetap terlihat)
+// - Jika divisi login = 5 (MMT): tampilkan HANYA divisi 'MMT' (mspk_divisi = 5)
+//   ATAU mspk_sublim = 'Y' (berlaku kombinasi dengan aturan cabang di atas)
 // - Filter manual cabang/workshop/sublim dari frontend bersifat opsional
-const getBrowseList = async (filters, userCabang) => {
+const getBrowseList = async (filters, userCabang, userDivisi) => {
   const {
     startDate,
     endDate,
@@ -24,6 +26,7 @@ const getBrowseList = async (filters, userCabang) => {
     .trim()
     .toUpperCase();
   const isP05 = normCab === "P05";
+  const isDiv5 = Number(userDivisi) === 5;
   const isAll =
     !normCab ||
     normCab === "ALL" ||
@@ -40,6 +43,11 @@ const getBrowseList = async (filters, userCabang) => {
   } else if (!isAll) {
     whereClause += ` AND (UPPER(TRIM(m.mspk_cab)) = ? OR m.mspk_cab = "" OR m.mspk_cab IS NULL)`;
     params.push(normCab);
+  }
+
+  // 1b. Aturan otomatis divisi login 5 (MMT): divisi MMT atau sublim Y.
+  if (isDiv5) {
+    whereClause += ` AND (m.mspk_divisi = 5 OR UPPER(TRIM(m.mspk_sublim)) = 'Y')`;
   }
 
   // 2. Filter khusus "On Progress" (ckLock di Delphi)
@@ -499,6 +507,28 @@ const saveBastData = async (payload, userKode, userCabang) => {
   }
 };
 
+// --- Kandidat nomor untuk mencari LHK Proof ---
+// Proof bisa dicatat atas nomor MAP maupun nomor SPK turunannya, maka cari
+// di: nomor MAP itu sendiri + SPK ber-FK spk_memo + SPK konvensi MAP-xxx→xxx
+// (konsisten dengan relationship map MMT).
+const proofTargetNomors = async (queryable, nomorMap) => {
+  const targets = [nomorMap];
+  const [derived] = await queryable.query(
+    `SELECT spk_nomor FROM tspk WHERE TRIM(spk_memo) = TRIM(?) LIMIT 20`,
+    [nomorMap],
+  );
+  for (const r of derived || []) {
+    const s = String(r.spk_nomor || "").trim();
+    if (s && !targets.includes(s)) targets.push(s);
+  }
+  const m = String(nomorMap || "").trim();
+  if (m.toUpperCase().startsWith("MAP-")) {
+    const suffix = m.slice(4).trim();
+    if (suffix && !targets.includes(suffix)) targets.push(suffix);
+  }
+  return targets;
+};
+
 // --- GET DETAIL BAST (Form Edit / View) ---
 const getBastDetail = async (nomor) => {
   if (!nomor) throw new Error("Nomor BAST wajib diisi.");
@@ -581,6 +611,8 @@ const getBastDetail = async (nomor) => {
   );
   const lock = lockRows[0] || null;
 
+  const proofTargets = await proofTargetNomors(db, nomor);
+  const proofPh = proofTargets.map(() => "?").join(",");
   const [proofRows] = await db.query(
     `SELECT h.lpr_nomor AS nomor_proof,
             DATE_FORMAT(h.lpr_tanggal, '%Y-%m-%d') AS tanggal_proof,
@@ -589,6 +621,7 @@ const getBastDetail = async (nomor) => {
             d.lprd_barcode AS barcode,
             d.lprd_panjang AS panjang,
             d.lprd_lebar AS lebar,
+            d.lprd_j_proof AS j_proof,
             d.lprd_j_meter AS j_meter,
             s.mst_brg_kode AS kode_bahan,
             b.brg_nama AS nama_bahan,
@@ -600,10 +633,35 @@ const getBastDetail = async (nomor) => {
        FROM tmasterstok_mmt GROUP BY mst_barcode
      ) s ON s.mst_barcode = REPLACE(TRIM(d.lprd_barcode), '\t', '')
      LEFT JOIN tbarang_mmt b ON b.brg_kode = s.mst_brg_kode
-     WHERE d.lprd_spk_nomor = ?
+     WHERE TRIM(d.lprd_spk_nomor) IN (${proofPh})
      ORDER BY h.lpr_tanggal DESC, h.lpr_nomor DESC`,
-    [nomor],
+    proofTargets,
   );
+
+  // Jumlah cetak = TOTAL J_Proof seluruh baris proof MAP ini (satu MAP bisa
+  // punya beberapa dokumen proof beda bahan/tahap — semuanya dihitung).
+  // j_meter satuannya meter bahan (bukan hasil cetak) — hanya dipakai sebagai
+  // fallback bila tidak ada satu pun J_Proof terisi (data lama).
+  const proofJumlahProof = (proofRows || []).reduce(
+    (sum, r) => sum + (Number(r.j_proof) || 0),
+    0,
+  );
+  const proofJumlahMeter = (proofRows || []).reduce(
+    (sum, r) => sum + (Number(r.j_meter) || 0),
+    0,
+  );
+  const proofJumlah =
+    proofJumlahProof > 0 ? proofJumlahProof : proofJumlahMeter;
+  // Satu MAP bisa punya beberapa dokumen proof: header tampilkan semuanya
+  // (urutan tanggal DESC) agar konsisten dengan tabel detail bahan.
+  const proofNumbers = [
+    ...new Set(
+      (proofRows || [])
+        .map((r) => String(r.nomor_proof || "").trim())
+        .filter(Boolean),
+    ),
+  ];
+  const jumlahFromProof = proofJumlah > 0;
 
   const header = {
     mmpt_nomor: map.Nomor,
@@ -617,12 +675,16 @@ const getBastDetail = async (nomor) => {
     mmpt_rencana_size: map.RencanaSize,
     mmpt_keterangan: map.Keterangan,
     mmpt_kendala: map.Kendala,
-    mmpt_jumlah_jadi: map.JumlahJadi ?? map.Jumlah ?? 0,
+    mmpt_jumlah_jadi: jumlahFromProof
+      ? proofJumlah
+      : (map.JumlahJadi ?? map.Jumlah ?? 0),
     mmpt_tipe: map.Tipe || "Standard",
     mmpt_cabang: map.Cabang,
     mmpt_workshop: map.Workshop,
     mmpt_sublim: map.Sublim,
-    mmpt_proof_number: proofRows[0]?.nomor_proof || "",
+    mmpt_proof_number: proofNumbers.join(", "),
+    proof_jumlah: proofJumlah,
+    jumlah_from_proof: jumlahFromProof,
   };
 
   return {
@@ -735,6 +797,8 @@ const getSpkSizes = async (nomorMap) => {
 
 // --- GET PROOF BY SPK ---
 const getProofBySpk = async (spkNomor) => {
+  const proofTargets = await proofTargetNomors(db, spkNomor);
+  const proofPh = proofTargets.map(() => "?").join(",");
   const [rows] = await db.query(
     `SELECT h.lpr_nomor AS nomor_proof,
             DATE_FORMAT(h.lpr_tanggal, '%Y-%m-%d') AS tanggal_proof,
@@ -743,6 +807,8 @@ const getProofBySpk = async (spkNomor) => {
             d.lprd_barcode AS barcode,
             d.lprd_panjang AS panjang,
             d.lprd_lebar AS lebar,
+            d.lprd_j_proof AS j_proof,
+            d.lprd_j_meter AS j_meter,
             s.mst_brg_kode AS kode_bahan,
             b.brg_nama AS nama_bahan,
             b.brg_satuan AS satuan_bahan
@@ -753,10 +819,10 @@ const getProofBySpk = async (spkNomor) => {
        FROM tmasterstok_mmt GROUP BY mst_barcode
      ) s ON s.mst_barcode = REPLACE(TRIM(d.lprd_barcode), '\t', '')
      LEFT JOIN tbarang_mmt b ON b.brg_kode = s.mst_brg_kode
-     WHERE d.lprd_spk_nomor = ?
+     WHERE TRIM(d.lprd_spk_nomor) IN (${proofPh})
      ORDER BY h.lpr_tanggal DESC, h.lpr_nomor DESC
-     LIMIT 5`,
-    [spkNomor],
+     LIMIT 20`,
+    proofTargets,
   );
   return rows;
 };
@@ -797,8 +863,8 @@ const deleteBast = async (nomor, userKode) => {
 };
 
 // --- GET EXPORT DETAIL ---
-const getExportDetail = async (filters, userCabang) => {
-  const headers = await getBrowseList(filters, userCabang);
+const getExportDetail = async (filters, userCabang, userDivisi) => {
+  const headers = await getBrowseList(filters, userCabang, userDivisi);
   if (headers.length === 0) return [];
 
   const mapNomors = headers.map((h) => h.Nomor);
