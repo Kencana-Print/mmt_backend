@@ -3,17 +3,26 @@
 const pool = require('../config/db.config');
 const { format } = require('date-fns');
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
 /**
  * Mengambil Laporan Komparasi Realisasi Produksi MMT (Plan VS LHK)
  * Berdasarkan Periode Tanggal LHK / Tanggal Estimasi Planning
  */
 exports.getPlanVsLhkReport = async (startDate, endDate) => {
     try {
-        const tglMulai = format(new Date(startDate), 'yyyy-MM-dd');
-        const tglSelesai = format(new Date(endDate), 'yyyy-MM-dd');
+        const tglMulai = isValidDate(startDate) ? format(new Date(startDate), 'yyyy-MM-dd') : null;
+        const tglSelesai = isValidDate(endDate) ? format(new Date(endDate), 'yyyy-MM-dd') : null;
+        const hasDate = !!(tglMulai && tglSelesai);
 
-        // Parameter dikirim 4 kali karena query menggunakan UNION ALL
-        const params = [tglMulai, tglSelesai, tglMulai, tglSelesai];
+        // Parameter tanggal hanya dikirim bila lengkap; bila kosong, klausa jadi 1=1.
+        const params = hasDate ? [tglMulai, tglSelesai, tglMulai, tglSelesai] : [];
+        const dcPlan = hasDate ? "p.plan_tanggal BETWEEN ? AND ?" : "1=1";
+        const dcLhk = hasDate ? "h.ltanggal BETWEEN ? AND ?" : "1=1";
 
         const sql = `
             SELECT 
@@ -50,7 +59,7 @@ exports.getPlanVsLhkReport = async (startDate, endDate) => {
                     0 AS Lhk_M2
                 FROM tplanningspk_mmt p
                 LEFT JOIN tspk s ON s.spk_nomor = p.plan_spk
-                WHERE p.plan_tanggal BETWEEN ? AND ?
+                WHERE ${dcPlan}
 
                 UNION ALL
 
@@ -72,7 +81,7 @@ exports.getPlanVsLhkReport = async (startDate, endDate) => {
                 FROM tlhk_mesin_dtl d
                 INNER JOIN tlhk_mesin_hdr h ON h.lnomor = d.ld_lnomor
                 LEFT JOIN tspk s ON s.spk_nomor = d.ld_spk_nomor
-                WHERE h.ltanggal BETWEEN ? AND ?
+                WHERE ${dcLhk}
                 
             ) AS combine
             GROUP BY combine.Mesin, combine.NomorSPK, combine.NamaSPK, combine.Bahan, combine.Lebar, combine.Panjang

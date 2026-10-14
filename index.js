@@ -1,9 +1,11 @@
 const express = require("express");
 const cors = require("cors");
+const http = require("http");
 const cookieParser = require("cookie-parser");
 const fs = require("fs");
 const path = require("path");
 const clientCertAuth = require("./middleware/clientCertAuth");
+const { initSocket } = require("./socket");
 const imageFolderPath = "/mnt/image";
 
 require("dotenv").config();
@@ -273,7 +275,13 @@ app.use("/api/mmt/relationship-map", clientCertAuth, relationshipMapMmtRoutes);
 
 const port = process.env.PORT || 8003;
 
+// Realtime kolaborasi Komitmen Kirim (port socket Manksi Web).
+// httpServer dipakai bersama express agar WS + HTTP satu port.
+const httpServer = http.createServer(app);
+const io = initSocket(httpServer, { allowedOrigins });
+app.set("io", io);
+
 // Jalankan server
-app.listen(port, () => {
+httpServer.listen(port, () => {
   console.log(`⚡️[server]: Server berjalan di http://localhost:${port}`);
 });

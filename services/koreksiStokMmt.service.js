@@ -14,6 +14,22 @@ const throwDbError = (message, error) => {
 // ========================================================
 exports.getKoreksiStokData = async (startDate, endDate) => {
   try {
+    // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+    // filter tanggal di-skip (tanpa filter) bila tidak valid.
+    const isDateStr = (v) =>
+      typeof v === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+      !Number.isNaN(Date.parse(v));
+    const dateConds = [];
+    const params = [];
+    if (isDateStr(startDate)) {
+      dateConds.push("a.korh_tanggal >= ?");
+      params.push(format(new Date(startDate), "yyyy-MM-dd"));
+    }
+    if (isDateStr(endDate)) {
+      dateConds.push("a.korh_tanggal <= ?");
+      params.push(format(new Date(endDate), "yyyy-MM-dd"));
+    }
     const sqlMaster = `
       SELECT 
         a.korh_nomor AS Nomor, 
@@ -25,16 +41,12 @@ exports.getKoreksiStokData = async (startDate, endDate) => {
       FROM tkor_hdr_mmt a
       LEFT JOIN tgudang b ON b.gdg_kode = a.korh_gdg_kode
       LEFT JOIN tkor_type_mmt c ON c.kode = a.korh_type
-      WHERE a.korh_tanggal BETWEEN ? AND ? 
+      WHERE 1=1
+        ${dateConds.length ? "AND " + dateConds.join(" AND ") : ""}
         AND IFNULL(a.korh_typekor, 0) = 0 
         AND (b.gdg_kode LIKE '%WH-%' OR b.gdg_kode = 'GPM')
       GROUP BY a.korh_nomor, a.korh_tanggal, a.korh_notes, b.gdg_nama, a.korh_type, c.nama, a.korh_gdg_kode
       ORDER BY a.korh_tanggal DESC`;
-
-    const params = [
-      format(new Date(startDate), "yyyy-MM-dd"),
-      format(new Date(endDate), "yyyy-MM-dd"),
-    ];
 
     const [masterRows] = await pool.query(sqlMaster, params);
     if (masterRows.length === 0) return [];

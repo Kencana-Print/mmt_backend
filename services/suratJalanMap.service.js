@@ -16,6 +16,18 @@ const throwDbError = (message, error) => {
 const getSjMapList = async (startDate, endDate, canLihatCus = false) => {
   try {
     const custCol = canLihatCus ? "c.cus_nama AS Customer," : `"" AS Customer,`;
+    // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+    const dateConds = [];
+    const dateParams = [];
+    if (startDate) {
+      dateConds.push(`a.sj_tanggal >= ?`);
+      dateParams.push(startDate);
+    }
+    if (endDate) {
+      dateConds.push(`a.sj_tanggal <= ?`);
+      dateParams.push(endDate);
+    }
+    const dateClause = dateConds.length ? dateConds.join(" AND ") : "1=1";
 
     const headerQuery = `
       SELECT 
@@ -46,7 +58,7 @@ const getSjMapList = async (startDate, endDate, canLihatCus = false) => {
       INNER JOIN tsj_dtl_memo d ON d.sjd_sj_nomor = a.sj_nomor
       LEFT JOIN tcustomer c ON c.cus_kode = a.sj_cus_kode
       LEFT JOIN tdivisi v ON v.kode = a.sj_divisi
-      WHERE a.sj_tanggal >= ? AND a.sj_tanggal <= ?
+      WHERE ${dateClause}
       GROUP BY a.sj_nomor 
       ORDER BY a.sj_tanggal DESC, a.sj_nomor DESC
     `;
@@ -61,13 +73,13 @@ const getSjMapList = async (startDate, endDate, canLihatCus = false) => {
       FROM tsj_hdr_memo a 
       INNER JOIN tsj_dtl_memo d ON a.sj_nomor = d.sjd_sj_nomor 
       INNER JOIN tmemospk m ON m.mspk_Nomor = d.sjd_mspk_nomor 
-      WHERE a.sj_tanggal >= ? AND a.sj_tanggal <= ?
+      WHERE ${dateClause}
       ORDER BY d.sjd_sj_nomor
     `;
 
     const [[headers], [details]] = await Promise.all([
-      pool.query(headerQuery, [startDate, endDate]),
-      pool.query(detailQuery, [startDate, endDate]),
+      pool.query(headerQuery, dateParams),
+      pool.query(detailQuery, dateParams),
     ]);
 
     const nestedData = headers.map((header) => {

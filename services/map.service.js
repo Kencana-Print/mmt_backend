@@ -3,6 +3,7 @@ const db = pool; // Alias agar kompatibel dengan query yang menggunakan variabel
 const sharp = require("sharp");
 const fs = require("fs");
 const path = require("path");
+const komitmenKirimService = require("./komitmenkirim.service");
 
 // ==========================================
 // 1. HELPER & UTILITY FUNCTIONS
@@ -753,6 +754,23 @@ const save = async (data, userKode, isNewMode) => {
     }
 
     await conn.commit();
+
+    // Sinkron Komitmen Kirim MAP/Sampel (best-effort, di luar transaksi —
+    // cerminan mapFormService Manksi Web). Kegagalan di sini tidak
+    // menggagalkan save MAP (service-nya sendiri try/catch).
+    if (data.IsRevisi === "Y" && data.Referensi) {
+      await komitmenKirimService.removeMapFromKomitmenKirim(data.Referensi);
+    }
+    const [[aktifRow]] = await pool.query(
+      `SELECT mspk_aktif FROM tmemospk WHERE mspk_nomor = ?`,
+      [nomorMap],
+    );
+    if (aktifRow?.mspk_aktif === "N") {
+      await komitmenKirimService.removeMapFromKomitmenKirim(nomorMap);
+    } else if (data.Cmo && String(data.Cmo).trim()) {
+      await komitmenKirimService.pushMapToKomitmenKirim(nomorMap, userKode);
+    }
+
     return nomorMap;
   } catch (error) {
     await conn.rollback();
@@ -799,6 +817,8 @@ const deleteMap = async (nomor, userDetails) => {
   } finally {
     conn.release();
   }
+
+  await komitmenKirimService.removeMapFromKomitmenKirim(nomor);
 };
 
 // ==========================================
@@ -831,6 +851,7 @@ const approveCmo = async (nomor, userKode) => {
     userKode,
     nomor,
   ]);
+  await komitmenKirimService.pushMapToKomitmenKirim(nomor, userKode);
 };
 
 // --- PENGAJUAN PIN 5 (EDIT CLOSED DATA) ---

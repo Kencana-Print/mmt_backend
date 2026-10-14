@@ -14,4 +14,8 @@ router.post('/', mutasiController.createMutasi);
 // Endpoint untuk update mutasi berdasarkan nomor
 router.put('/:nomor', mutasiController.updateMutasi);
 
+// Endpoint untuk detail satu dokumen (form Ubah). Ditaruh setelah
+// '/generate-nomor' agar tidak tertukar (express cocok berurutan).
+router.get('/:nomor', mutasiController.getMutasiDetail);
+
 module.exports = router;

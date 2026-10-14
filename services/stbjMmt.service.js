@@ -6,8 +6,23 @@ const { format } = require('date-fns');
  * (Logika dari btnRefreshClick -> Self.SQLMaster)
  */
 const getReport = async (startDate, endDate) => {
-  const tglMulai = format(new Date(startDate), 'yyyy-MM-dd');
-  const tglSelesai = format(new Date(endDate), 'yyyy-MM-dd');
+  // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+  // filter tanggal di-skip (tanpa filter) bila tidak valid.
+  // (format(new Date("")) melempar RangeError, jadi validasi dulu.)
+  const isDateStr = (v) =>
+    typeof v === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+    !Number.isNaN(Date.parse(v));
+  const dateConds = [];
+  const params = [];
+  if (isDateStr(startDate)) {
+    dateConds.push("spk_tanggal >= ?");
+    params.push(format(new Date(startDate), "yyyy-MM-dd"));
+  }
+  if (isDateStr(endDate)) {
+    dateConds.push("spk_tanggal <= ?");
+    params.push(format(new Date(endDate), "yyyy-MM-dd"));
+  }
 
   const sql = `
     SELECT 
@@ -49,11 +64,11 @@ const getReport = async (startDate, endDate) => {
       INNER JOIN tstbj_dtl b ON (stbjd_stbj_nomor = stbj_nomor)
       GROUP BY stbjd_spk_nomor
     ) x ON (stbjd_spk_nomor = spk_nomor)
-    WHERE spk_tanggal BETWEEN ? AND ?
-    AND spk_divisi IN (5)
+    WHERE spk_divisi IN (5)
+    ${dateConds.length ? "AND " + dateConds.join(" AND ") : ""}
   `;
 
-  const [rows] = await pool.query(sql, [tglMulai, tglSelesai]);
+  const [rows] = await pool.query(sql, params);
   return rows;
 };
 

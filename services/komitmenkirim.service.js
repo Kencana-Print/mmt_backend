@@ -2,6 +2,17 @@ const db = require("../config/db.config");
 
 // ── Browse header (list periode) ──
 const getBrowse = async (startDate, endDate, cabang = "") => {
+  // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+  const dateConds = [];
+  const params = [];
+  if (startDate) {
+    dateConds.push(`h.pjw_tgl1 >= ?`);
+    params.push(startDate);
+  }
+  if (endDate) {
+    dateConds.push(`h.pjw_tgl1 <= ?`);
+    params.push(endDate);
+  }
   let query = `SELECT
        h.pjw_nomor AS Nomor,
        DATE_FORMAT(h.pjw_tgl1, '%Y-%m-%d') AS TglAwal,
@@ -13,8 +24,7 @@ const getBrowse = async (startDate, endDate, cabang = "") => {
        SUM(CASE WHEN d.pjwd_id IS NOT NULL AND d.pjwd_tipe = 'MAP' THEN 1 ELSE 0 END) AS JumlahMap
      FROM tpenjadwalan_ppic_hdr h
      LEFT JOIN tpenjadwalan_ppic_dtl d ON d.pjwd_pjw_nomor = h.pjw_nomor
-     WHERE h.pjw_tgl1 BETWEEN ? AND ?`;
-  const params = [startDate, endDate];
+     WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}`;
 
   if (cabang) {
     query += ` AND h.pjw_cab = ?`;
@@ -1135,6 +1145,14 @@ const updateDetailField = async (
   }
   assertFieldOwnership(field, FIELD_OWNERSHIP, userKode, userBagian);
 
+  // Nomor periode pemilik baris — dibutuhkan controller untuk emit socket
+  // ke room yang tepat (frontend tidak mengirim pjwNomor).
+  const [[ownRow]] = await db.query(
+    `SELECT pjwd_pjw_nomor FROM tpenjadwalan_ppic_dtl WHERE pjwd_id = ?`,
+    [pjwdId],
+  );
+  if (!ownRow) throw new Error("Baris tidak ditemukan.");
+
   let sanitizedValue = value;
   if (DATE_FIELDS.includes(field) && (value === "" || value === undefined)) {
     sanitizedValue = null;
@@ -1169,6 +1187,7 @@ const updateDetailField = async (
   );
   return {
     pjwd_id: Number(pjwdId),
+    pjw_nomor: ownRow.pjwd_pjw_nomor,
     field,
     value: sanitizedValue,
     warning: melebihiBatas ? { totalSetelah, batas: batasKapasitas } : null,
@@ -1184,10 +1203,15 @@ const deleteDetailRow = async (pjwdId, userKode, userBagian) => {
       "Menghapus baris hanya bisa dilakukan oleh bagian MARKETING.",
     );
   }
+  const [[ownRow]] = await db.query(
+    `SELECT pjwd_pjw_nomor FROM tpenjadwalan_ppic_dtl WHERE pjwd_id = ?`,
+    [pjwdId],
+  );
+  if (!ownRow) throw new Error("Baris tidak ditemukan.");
   await db.query(`DELETE FROM tpenjadwalan_ppic_dtl WHERE pjwd_id = ?`, [
     pjwdId,
   ]);
-  return { pjwd_id: Number(pjwdId) }; // ⬅ cast ke Number
+  return { pjwd_id: Number(pjwdId), pjw_nomor: ownRow.pjwd_pjw_nomor }; // ⬅ cast ke Number
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -1322,6 +1346,7 @@ const moveDetailRowToPeriod = async (
     // ada — digabung (merge Rencana), bukan pindah-tabrak (yang akan
     // kena UNIQUE KEY constraint uq_pjwd_so).
     let merged = false;
+    let mergedIntoId = null;
     if (key && target) {
       const identifierCol = row.pjwd_so_nomor
         ? "pjwd_so_nomor"
@@ -1349,6 +1374,7 @@ const moveDetailRowToPeriod = async (
           [pjwdId],
         );
         merged = true;
+        mergedIntoId = Number(existingTarget.pjwd_id);
       }
     }
 
@@ -1378,6 +1404,7 @@ const moveDetailRowToPeriod = async (
     return {
       moved: true,
       merged,
+      mergedIntoId,
       arah,
       fromNomor: row.pjwd_pjw_nomor,
       nomor: targetNomor,
@@ -1395,19 +1422,25 @@ const moveDetailRowToPeriod = async (
 const KOMITMEN_KIRIM_CABANG = ["P01", "P02", "P04", "P05"];
 
 // ── Auto-push MAP yang baru di-approve CMO ke Komitmen Kirim MAP/Sampel ──
-// Dipanggil dari approveCmo (Browse) dan save (Form, saat Cmo terisi).
+// Dipanggil dari approveCmo dan save (Form, saat Cmo terisi).
 // Best-effort & idempotent — kegagalan di sini TIDAK boleh menggagalkan
 // approve/save MAP itu sendiri.
-const pushMapToKomitmenKirim = async (mapNomor, userKode = "SYSTEM") => {
+// Adaptasi dari Manksi: DB MMT tidak punya kolom mspk_tgl_cmo &
+// mspk_dateline, maka jangkar minggu = tanggal approve (hari ini,
+// via anchorDate) dan tanggal permintaan kirim = NULL.
+const pushMapToKomitmenKirim = async (
+  mapNomor,
+  userKode = "SYSTEM",
+  anchorDate = null,
+) => {
   try {
     const [[map]] = await db.query(
-      `SELECT mspk_nomor, mspk_nama, DATE_FORMAT(mspk_tgl_cmo, '%Y-%m-%d') AS tgl_approve,
-              DATE_FORMAT(mspk_dateline, '%Y-%m-%d') AS tgl_dateline,
-              mspk_cab, mspk_divisi, mspk_jumlah
+      `SELECT mspk_nomor, mspk_nama, mspk_cab, mspk_divisi, mspk_jumlah,
+              mspk_referensi
        FROM tmemospk WHERE mspk_nomor = ? AND mspk_aktif = 'Y'`,
       [mapNomor],
     );
-    if (!map || !map.tgl_approve) return;
+    if (!map) return;
 
     const cab = map.mspk_cab || "";
     if (!KOMITMEN_KIRIM_CABANG.includes(cab)) return;
@@ -1418,18 +1451,37 @@ const pushMapToKomitmenKirim = async (mapNomor, userKode = "SYSTEM") => {
     );
     if (existing) return;
 
+    // MAP revisi: arahkan baris MAP asal ke MAP revisi ini. Rencana,
+    // Permintaan Kirim & Kesepakatan tetap.
+    if (map.mspk_referensi) {
+      await db.query(
+        `UPDATE tpenjadwalan_ppic_dtl
+         SET pjwd_map_nomor = ?,
+             pjwd_pesan_manual = IF(pjwd_tipe = 'MAP', ?, pjwd_pesan_manual)
+         WHERE pjwd_map_nomor = ?`,
+        [mapNomor, Number(map.mspk_jumlah) || 0, map.mspk_referensi],
+      );
+      const [[sudahAda]] = await db.query(
+        `SELECT pjwd_id FROM tpenjadwalan_ppic_dtl
+         WHERE pjwd_map_nomor = ? AND pjwd_tipe = 'MAP' LIMIT 1`,
+        [mapNomor],
+      );
+      if (sudahAda) return;
+    }
+
+    const anchor = anchorDate || toLocalDate(new Date());
     const [[periode]] = await db.query(
       `SELECT pjw_nomor FROM tpenjadwalan_ppic_hdr
        WHERE pjw_cab = ? AND ? BETWEEN pjw_tgl1 AND pjw_tgl2
        ORDER BY pjw_tgl1 DESC LIMIT 1`,
-      [cab, map.tgl_approve],
+      [cab, anchor],
     );
 
     let pjwNomor;
     if (periode) {
       pjwNomor = periode.pjw_nomor;
     } else {
-      const { tgl1, tgl2 } = getWeekRange(map.tgl_approve);
+      const { tgl1, tgl2 } = getWeekRange(anchor);
       pjwNomor = await generateNomor(new Date(tgl1).getFullYear());
       await db.query(
         `INSERT INTO tpenjadwalan_ppic_hdr
@@ -1444,12 +1496,11 @@ const pushMapToKomitmenKirim = async (mapNomor, userKode = "SYSTEM") => {
          (pjwd_pjw_nomor, pjwd_tipe, pjwd_map_nomor, pjwd_rencana,
           pjwd_tgl_permintaan_kirim, pjwd_status_permintaan, pjwd_user_create,
           pjwd_pesan_manual, pjwd_kirim_manual)
-       VALUES (?, 'MAP', ?, ?, ?, 'CLOSE', ?, ?, 0)`,
+       VALUES (?, 'MAP', ?, ?, NULL, 'CLOSE', ?, ?, 0)`,
       [
         pjwNomor,
         mapNomor,
         Number(map.mspk_jumlah) || 0,
-        map.tgl_dateline || null,
         userKode,
         Number(map.mspk_jumlah) || 0,
       ],

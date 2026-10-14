@@ -252,6 +252,12 @@ exports.validateBahanLhk = async (kode) => {
 exports.getLhkLayoutList = async (filters) => {
     try {
         const { startDate, endDate, search } = filters;
+        // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+        // filter tanggal di-skip (tanpa filter) bila tidak valid.
+        const isDateStr = (v) =>
+            typeof v === "string" &&
+            /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+            !Number.isNaN(Date.parse(v));
         let sql = `
             SELECT 
                 l.ld_spk AS Nomor, 
@@ -264,10 +270,18 @@ exports.getLhkLayoutList = async (filters) => {
                 l.spk_finishing AS Keterangan
             FROM tlhk_layout l
             LEFT JOIN tlhk_layout_detail d ON l.ld_spk = d.ld_spk
-            WHERE l.ld_tanggal BETWEEN ? AND ?
+            WHERE 1=1
         `;
         
-        const params = [startDate, endDate];
+        const params = [];
+        if (isDateStr(startDate)) {
+            sql += ` AND l.ld_tanggal >= ?`;
+            params.push(startDate);
+        }
+        if (isDateStr(endDate)) {
+            sql += ` AND l.ld_tanggal <= ?`;
+            params.push(endDate);
+        }
         
         if (search && search.trim() !== "") {
             sql += ` AND (l.ld_spk LIKE ? OR l.spk_nama LIKE ?)`;

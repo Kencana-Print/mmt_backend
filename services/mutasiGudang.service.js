@@ -76,26 +76,38 @@ exports.saveMutasiGudang = async (data, isUpdate = false, userLogin) => {
         if (Details && Details.length > 0) {
             
             // =========================================================================
-            // Grouping per ROLL: kunci = kode_barang + barcode (+ expired).
-            // Satu barcode = satu roll dengan panjang/lebar sendiri, jadi tidak
-            // boleh digabung hanya berdasar kode_barang (merusak jejak per-roll).
+            // DUA LEVEL GROUPING (aturan PK tiap tabel beda):
+            // - tmutasi_dtl_mmt PK = (mutd_mut_nomor, mutd_brg_kode) → pawn
+            //   satu baris per BAHAN. Dua baris bahan sama beda barcode WAJIB
+            //   digabung (qty diakumulasi), kalau tidak bulk INSERT menabrak
+            //   PRIMARY KEY ("Duplicate entry '<nomor>-<bahan>'").
+            // - tmasterstok_mmt PK = id (bebas) → grouping per ROLL
+            //   (kode + barcode + expired) dipertahankan agar jejak per-roll
+            //   (panjang/lebar/spk/barcode) tidak hilang dari kartu stok.
             // =========================================================================
-            const groupedDetailsMap = new Map();
+            const groupedByRoll = new Map();
+            const groupedByBahan = new Map();
 
             for (const d of Details) {
-                const key = `${d.kode_barang}_${d.barcode || ''}_${d.expired || 'null'}`;
-                if (groupedDetailsMap.has(key)) {
-                    const existing = groupedDetailsMap.get(key);
-                    // Tambahkan QTY nya (di-count akumulasi)
-                    existing.qty += Number(d.qty);
+                const rollKey = `${d.kode_barang}_${d.barcode || ''}_${d.expired || 'null'}`;
+                if (groupedByRoll.has(rollKey)) {
+                    groupedByRoll.get(rollKey).qty += Number(d.qty);
                 } else {
-                    // Jika belum ada, masukkan data baru (clone agar tidak merubah data asli klien)
-                    groupedDetailsMap.set(key, { ...d, qty: Number(d.qty) });
+                    // Clone agar tidak merubah data asli klien
+                    groupedByRoll.set(rollKey, { ...d, qty: Number(d.qty) });
+                }
+
+                const bahanKey = `${d.kode_barang}`;
+                if (groupedByBahan.has(bahanKey)) {
+                    groupedByBahan.get(bahanKey).qty += Number(d.qty);
+                } else {
+                    groupedByBahan.set(bahanKey, { ...d, qty: Number(d.qty) });
                 }
             }
 
             // Ubah kembali Map hasil grouping menjadi Array untuk diproses query
-            const finalDetails = Array.from(groupedDetailsMap.values());
+            const finalRolls = Array.from(groupedByRoll.values());
+            const finalDetails = Array.from(groupedByBahan.values());
             // =========================================================================
 
             // Siapkan bulk values untuk tmutasi_dtl_mmt berdasarkan data yang sudah di-group
@@ -120,7 +132,7 @@ exports.saveMutasiGudang = async (data, isUpdate = false, userLogin) => {
             // Ambil hargabeli & satuan_harga terakhir tiap barcode dari
             // tmasterstok_mmt agar baris OUT yang baru membawa harga yang sama.
             const distinctBarcodes = [...new Set(
-                finalDetails.map((d) => (d.barcode || '').trim()).filter(Boolean)
+                finalRolls.map((d) => (d.barcode || '').trim()).filter(Boolean)
             )];
             const hargaByBarcode = new Map();
             if (distinctBarcodes.length > 0) {
@@ -141,8 +153,9 @@ exports.saveMutasiGudang = async (data, isUpdate = false, userLogin) => {
                 }
             }
 
-            // --- LOGIKA KARTU STOK OTOMATIS MENGGUNAKAN DATA YANG SUDAH DI-GROUP ---
-            for (const item of finalDetails) {
+            // --- LOGIKA KARTU STOK OTOMATIS MENGGUNAKAN DATA PER-ROLL ---
+            // (finalRolls: tiap barcode tercatat gerakannya masing-masing)
+            for (const item of finalRolls) {
                 
                 // A. KONDISI MASUK KE TABEL BARU (tmasterstok_bahan) JIKA TUJUAN KE 'GB001'
                 if (GudangTujuan === 'GB001') {
@@ -222,8 +235,94 @@ exports.saveMutasiGudang = async (data, isUpdate = false, userLogin) => {
     }
 };
 
-exports.getMutasiData = async (startDate, endDate, search = '') => {
-    try {
+// --- DETAIL SATU DOKUMEN (untuk form Ubah) ---
+// Baris dikembalikan per-roll (satu baris per barcode, sesuai model input
+// form) dari kartu stok OUT gudang asal. Jejak per-roll memang tersimpan di
+// tmasterstok_mmt (bukan di tmutasi_dtl_mmt yang PK-nya per bahan) — jadi
+// TIDAK perlu tambah kolom barcode di tabel detail (sumber ganda justru
+// mengundang inkonsistensi; getMutasiData pun sudah menggabungkannya via
+// GROUP_CONCAT untuk tampilan).
+exports.getMutasiGudangDetail = async (nomor) => {
+    const [hdr] = await pool.query(
+        `SELECT mut_nomor AS Nomor, DATE_FORMAT(mut_tanggal, '%Y-%m-%d') AS Tanggal,
+                mut_gdg_asal AS GudangAsal, mut_gdg_tujuan AS GudangTujuan,
+                mut_keterangan AS Keterangan, mut_type AS Type
+         FROM tmutasi_hdr_mmt WHERE mut_nomor = ? LIMIT 1`,
+        [nomor]
+    );
+    if (!hdr.length) return null;
+    const h = hdr[0];
+
+    const [rolls] = await pool.query(
+        `SELECT s.mst_brg_kode AS kode, s.mst_barcode AS barcode, s.mst_stok_out AS qty,
+                s.mst_panjang AS panjang, s.mst_lebar AS lebar, s.mst_spk_nomor AS spk
+         FROM tmasterstok_mmt s
+         WHERE s.mst_noreferensi = ? AND s.mst_gdg_kode = ? AND s.mst_stok_out <> 0
+         ORDER BY s.id`,
+        [nomor, h.GudangAsal]
+    );
+    const [dtls] = await pool.query(
+        `SELECT mutd_brg_kode AS kode, mutd_qty AS qty, mutd_expired AS expired,
+                mutd_keterangan AS keterangan, mutd_nourut AS nourut
+         FROM tmutasi_dtl_mmt WHERE mutd_mut_nomor = ? ORDER BY mutd_nourut`,
+        [nomor]
+    );
+
+    const codes = [...new Set([...rolls.map((r) => r.kode), ...dtls.map((d) => d.kode)])].filter(Boolean);
+    const brgMap = {};
+    if (codes.length) {
+        const [brows] = await pool.query(
+            `SELECT brg_kode, brg_nama, brg_satuan FROM tbarang_mmt WHERE brg_kode IN (?)`,
+            [codes]
+        );
+        for (const b of brows) brgMap[b.brg_kode] = b;
+    }
+    const dtlByKode = {};
+    for (const d of dtls) {
+        if (!dtlByKode[d.kode]) dtlByKode[d.kode] = d;
+    }
+
+    let details;
+    if (rolls.length) {
+        details = rolls.map((r) => {
+            const d = dtlByKode[r.kode] || {};
+            const b = brgMap[r.kode] || {};
+            return {
+                kode_barang: r.kode,
+                barcode: r.barcode || '',
+                qty: Number(r.qty) || 0,
+                panjang: Number(r.panjang) || 0,
+                lebar: Number(r.lebar) || 0,
+                spk: r.spk || '',
+                satuan: b.brg_satuan || '',
+                Nama_Bahan: b.brg_nama || '',
+                keterangan: d.keterangan || '',
+                expired: d.expired || null,
+            };
+        });
+    } else {
+        // Dok lama tanpa jejak masterstok: tampilkan agregat per bahan.
+        details = dtls.map((d) => {
+            const b = brgMap[d.kode] || {};
+            return {
+                kode_barang: d.kode,
+                barcode: '',
+                qty: Number(d.qty) || 0,
+                panjang: 0,
+                lebar: 0,
+                spk: '',
+                satuan: b.brg_satuan || '',
+                Nama_Bahan: b.brg_nama || '',
+                keterangan: d.keterangan || '',
+                expired: d.expired || null,
+            };
+        });
+    }
+
+    return { header: h, details };
+};
+
+exports.getMutasiData = async (startDate, endDate, search = '') => {    try {
         let sqlMaster = `
             SELECT 
                 h.mut_nomor AS Nomor,
@@ -249,20 +348,40 @@ exports.getMutasiData = async (startDate, endDate, search = '') => {
         if (masterResults.length === 0) return [];
 
         const nomors = masterResults.map(r => r.Nomor);
+        // Detail per BARCODE (satu baris per roll): Panjang/Lebar/Qty akurat
+        // per roll, bukan MAX/gabungan yang menyesatkan. Sumber jejak
+        // per-roll adalah kartu stok OUT gudang asal. Baris dtl yang tak
+        // punya jejak masterstok (dok lama) tampil sebagai satu baris
+        // agregat fallback.
         const [detailResults] = await pool.query(
             `SELECT
                 d.mutd_mut_nomor AS Nomor, d.mutd_brg_kode AS Kode,
-                b.brg_nama AS Nama_Barang, d.mutd_qty AS Qty,
-                d.mutd_expired AS Expired, d.mutd_keterangan AS Ket,
-                GROUP_CONCAT(DISTINCT s.mst_barcode SEPARATOR ', ') AS Barcode,
-                MAX(s.mst_panjang) AS Panjang, MAX(s.mst_lebar) AS Lebar
+                b.brg_nama AS Nama_Barang,
+                s.mst_barcode AS Barcode, s.mst_panjang AS Panjang,
+                s.mst_lebar AS Lebar, s.mst_stok_out AS Qty,
+                d.mutd_expired AS Expired, d.mutd_keterangan AS Ket
              FROM tmutasi_dtl_mmt d
              LEFT JOIN tbarang_mmt b ON d.mutd_brg_kode = b.brg_kode
-             LEFT JOIN tmasterstok_mmt s ON s.mst_noreferensi = d.mutd_mut_nomor
-                AND s.mst_brg_kode = d.mutd_brg_kode AND s.mst_stok_out > 0
+             INNER JOIN tmasterstok_mmt s ON s.mst_noreferensi = d.mutd_mut_nomor
+                AND s.mst_brg_kode = d.mutd_brg_kode AND s.mst_stok_out <> 0
              WHERE d.mutd_mut_nomor IN (?)
-             GROUP BY d.mutd_mut_nomor, d.mutd_brg_kode, b.brg_nama,
-                      d.mutd_qty, d.mutd_expired, d.mutd_keterangan`, [nomors]
+             UNION ALL
+             SELECT
+                d.mutd_mut_nomor AS Nomor, d.mutd_brg_kode AS Kode,
+                b.brg_nama AS Nama_Barang,
+                '' AS Barcode, NULL AS Panjang, NULL AS Lebar,
+                d.mutd_qty AS Qty,
+                d.mutd_expired AS Expired, d.mutd_keterangan AS Ket
+             FROM tmutasi_dtl_mmt d
+             LEFT JOIN tbarang_mmt b ON d.mutd_brg_kode = b.brg_kode
+             WHERE d.mutd_mut_nomor IN (?)
+               AND NOT EXISTS (
+                 SELECT 1 FROM tmasterstok_mmt s
+                 WHERE s.mst_noreferensi = d.mutd_mut_nomor
+                   AND s.mst_brg_kode = d.mutd_brg_kode
+                   AND s.mst_stok_out <> 0
+               )
+             ORDER BY Nomor, Kode, Barcode`, [nomors, nomors]
         );
 
         // Mapping detail ke dalam master

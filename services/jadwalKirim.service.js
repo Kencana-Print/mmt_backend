@@ -9,7 +9,19 @@ const { format } = require('date-fns'); // Tambahkan ini
  */
 
 const getJadwalKirimData = async (startDate, endDate, gudang, search) => {
-  let params = [startDate, endDate];
+  // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+  let params = [];
+  let dateClause = "";
+  if (startDate && endDate) {
+    dateClause = `a.Tanggal >= ? AND a.Tanggal <= ?`;
+    params = [startDate, endDate];
+  } else if (startDate) {
+    dateClause = `a.Tanggal >= ?`;
+    params = [startDate];
+  } else if (endDate) {
+    dateClause = `a.Tanggal <= ?`;
+    params = [endDate];
+  }
   
   let sql = `
     SELECT 
@@ -35,7 +47,7 @@ const getJadwalKirimData = async (startDate, endDate, gudang, search) => {
       SELECT mspk_nomor, mspk_nama, mspk_ukuran, mspk_kain FROM tmemospk
     ) b ON b.spk_nomor = a.spk_nomor
     LEFT JOIN tgudang gdg ON gdg.gdg_kode = a.gudang 
-    WHERE a.Tanggal >= ? AND a.Tanggal <= ?
+    WHERE ${dateClause || "1=1"}
   `;
 
   // 1. Filter Gudang (LIKE match)

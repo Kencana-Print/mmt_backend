@@ -3,8 +3,11 @@ const { subDays } = require('date-fns');
 
 exports.getReport = async (req, res) => {
   try {
-    const endDate = req.query.endDate || new Date();
-    const startDate = req.query.startDate || subDays(endDate, 30);
+    // undefined (param tak dikirim) = default 30 hari; string kosong "" = tanpa filter tanggal.
+    const qEnd = req.query.endDate;
+    const endDate = qEnd === undefined ? new Date() : qEnd;
+    const qStart = req.query.startDate;
+    const startDate = qStart === undefined ? subDays(new Date(endDate), 30) : qStart;
     
     const data = await brgJadiService.getReport(startDate, endDate);
     res.json(data);

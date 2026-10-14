@@ -8,12 +8,7 @@ const getLaporanAgregasi = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        message: "Parameter startDate dan endDate wajib diisi",
-      });
-    }
-
+    // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
     const data = await lapLhkService.getLaporanAgregasi(startDate, endDate);
     res.status(200).json({ success: true, data });
   } catch (error) {
@@ -29,12 +24,7 @@ const getRekapLhk = async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        message: "Parameter startDate dan endDate wajib diisi",
-      });
-    }
-
+    // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
     const data = await lapLhkService.getRekapLhk(startDate, endDate);
     res.status(200).json({ success: true, data });
   } catch (error) {
@@ -71,12 +61,7 @@ const getAllDataForExport = async (req, res) => {
   try {
     const { startDate, endDate, mesin } = req.query;
 
-    if (!startDate || !endDate) {
-      return res.status(400).json({
-        message: "Parameter startDate dan endDate wajib diisi",
-      });
-    }
-
+    // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
     const data = await lapLhkService.getAllDataForExport(
       startDate,
       endDate,
@@ -96,12 +81,13 @@ const getDetailRekapMesin = async (req, res) => {
   try {
     const { startDate, endDate, mesin } = req.query;
 
-    if (!startDate || !endDate || !mesin) {
+    if (!mesin) {
       return res.status(400).json({
-        message: "Parameter startDate, endDate, dan mesin wajib diisi",
+        message: "Parameter mesin wajib diisi",
       });
     }
 
+    // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
     const data = await lapLhkService.getDetailRekapMesin(
       startDate,
       endDate,

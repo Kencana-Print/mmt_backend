@@ -1,6 +1,15 @@
 const pool = require("../config/db.config");
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
 const getLaporanBarangJadi = async (startDate, endDate) => {
+    const hasDate = isValidDate(startDate) && isValidDate(endDate);
+    const dateFilter = hasDate ? "AND spk_tanggal BETWEEN ? AND ?" : "";
+    const params = hasDate ? [startDate, endDate] : [];
     // Query ini murni mengikuti logic ssql di procedure TfrmLapBarangjadi_mmt.loaddata
     const sql = `
         SELECT 
@@ -38,12 +47,12 @@ const getLaporanBarangJadi = async (startDate, endDate) => {
             GROUP BY sjd_spk_nomor 
         ) c ON (c.sjd_spk_nomor = spk_nomor)
         WHERE spk_divisi = 5
-        AND spk_tanggal BETWEEN ? AND ?
+        ${dateFilter}
         ORDER BY spk_tanggal DESC
     `;
 
     try {
-        const [rows] = await pool.query(sql, [startDate, endDate]);
+        const [rows] = await pool.query(sql, params);
         return rows;
     } catch (error) {
         throw error;

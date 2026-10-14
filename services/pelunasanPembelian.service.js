@@ -219,6 +219,17 @@ exports.getOutstandingBpb = async (supKode) => {
 // ===================================
 exports.getPelunasanData = async (startDate, endDate) => {
     try {
+        // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+        const dateConds = [];
+        const dateParams = [];
+        if (startDate) {
+            dateConds.push(`h.pelh_tanggal >= ?`);
+            dateParams.push(startDate);
+        }
+        if (endDate) {
+            dateConds.push(`h.pelh_tanggal <= ?`);
+            dateParams.push(endDate);
+        }
         // 1. Query Header Pelunasan
         const sqlHeader = `
             SELECT 
@@ -230,10 +241,10 @@ exports.getPelunasanData = async (startDate, endDate) => {
                 h.pelh_keterangan AS Keterangan
             FROM tpelunasan_pembelian_hdr h
             LEFT JOIN tsupplier s ON s.sup_kode = h.pelh_sup_kode
-            WHERE h.pelh_tanggal BETWEEN ? AND ?
+            WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
             ORDER BY h.pelh_tanggal DESC, h.pelh_nomor DESC
         `;
-        const [headers] = await pool.query(sqlHeader, [startDate, endDate]);
+        const [headers] = await pool.query(sqlHeader, dateParams);
 
         if (headers.length === 0) return [];
 

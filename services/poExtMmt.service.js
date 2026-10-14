@@ -5,6 +5,22 @@ const pool = require("../config/db.config");
  * Mendapatkan daftar PO dengan logika warna/status seperti di Delphi
  */
 const getPoExternalBrowse = async (startDate, endDate, userCab) => {
+  // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+  // filter tanggal di-skip (tanpa filter) bila tidak valid.
+  const isDateStr = (v) =>
+    typeof v === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+    !Number.isNaN(Date.parse(v));
+  const dateConds = [];
+  const params = [];
+  if (isDateStr(startDate)) {
+    dateConds.push("h.poe_tanggal >= ?");
+    params.push(startDate);
+  }
+  if (isDateStr(endDate)) {
+    dateConds.push("h.poe_tanggal <= ?");
+    params.push(endDate);
+  }
   // Menyelaraskan query asli Delphi menggunakan klause IF() bertingkat pada tspk_pin5
   const sql = `
         SELECT x.*,
@@ -31,14 +47,14 @@ const getPoExternalBrowse = async (startDate, endDate, userCab) => {
             FROM tpoexternal_hdr h
             LEFT JOIN tspk s ON s.spk_nomor = h.poe_spk_nomor
             LEFT JOIN tsupplier u ON u.Sup_kode = h.poe_sup
-            WHERE h.poe_tanggal BETWEEN ? AND ?
+            WHERE 1=1
+            ${dateConds.length ? "AND " + dateConds.join(" AND ") : ""}
             AND h.poe_cab IN ('P02', 'P05', 'MT1')
             ${userCab ? "AND h.poe_cab = ?" : ""}
         ) x
         ORDER BY x.Nomor DESC
     `;
 
-  const params = [startDate, endDate];
   if (userCab) params.push(userCab);
 
   const [rows] = await pool.query(sql, params);

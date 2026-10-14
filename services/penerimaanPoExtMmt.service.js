@@ -1,6 +1,17 @@
 const pool = require('../config/db.config');
 
 exports.getBrowseData = async (start, end, cab) => {
+    // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+    const dateConds = [];
+    const params = [];
+    if (start) {
+        dateConds.push(`h.bpe_tanggal >= ?`);
+        params.push(start);
+    }
+    if (end) {
+        dateConds.push(`h.bpe_tanggal <= ?`);
+        params.push(end);
+    }
     let sql = `
         SELECT h.bpe_nomor AS Nomor, h.bpe_tanggal AS Tanggal, h.bpe_po AS NomorPO, 
                h.bpe_cab AS Cab, h.bpe_spk_nomor AS SPK, s.spk_nama AS NamaSPK,
@@ -10,10 +21,9 @@ exports.getBrowseData = async (start, end, cab) => {
         FROM tbpbpoexternal_hdr h
         LEFT JOIN tspk s ON s.spk_nomor = h.bpe_spk_nomor
         LEFT JOIN tsupplier u ON u.Sup_kode = h.bpe_sup
-        WHERE h.bpe_tanggal BETWEEN ? AND ?
+        WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
     `;
     
-    const params = [start, end];
     if (cab && cab !== 'ALL') {
         sql += ` AND h.bpe_cab = ?`;
         params.push(cab);

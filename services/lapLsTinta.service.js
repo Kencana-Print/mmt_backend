@@ -2,10 +2,34 @@
 const pool = require("../config/db.config");
 const { format } = require('date-fns');
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
 exports.getLaporanStokObat = async (startDate, endDate) => {
     try {
-        const sDate = format(new Date(startDate), 'yyyy-MM-dd');
-        const eDate = format(new Date(endDate), 'yyyy-MM-dd');
+        const sDate = isValidDate(startDate) ? format(new Date(startDate), 'yyyy-MM-dd') : null;
+        const eDate = isValidDate(endDate) ? format(new Date(endDate), 'yyyy-MM-dd') : null;
+
+        // Tanpa tanggal mulai: tidak ada konsep stok awal (0), mutasi = seluruh periode.
+        const saFilter = sDate ? "WHERE mst_tanggal < ? AND mst_aktif = 'Y'" : "WHERE mst_aktif = 'Y' AND 1=0";
+        const saParams = sDate ? [sDate] : [];
+        let mutFilter, mutParams;
+        if (sDate && eDate) {
+            mutFilter = "WHERE (mst_tanggal BETWEEN ? AND ?) AND mst_aktif = 'Y'";
+            mutParams = [sDate, eDate];
+        } else if (sDate) {
+            mutFilter = "WHERE mst_tanggal >= ? AND mst_aktif = 'Y'";
+            mutParams = [sDate];
+        } else if (eDate) {
+            mutFilter = "WHERE mst_tanggal <= ? AND mst_aktif = 'Y'";
+            mutParams = [eDate];
+        } else {
+            mutFilter = "WHERE mst_aktif = 'Y'";
+            mutParams = [];
+        }
 
         const sql = `
             SELECT 
@@ -34,7 +58,7 @@ exports.getLaporanStokObat = async (startDate, endDate) => {
                     mst_brg_kode, 
                     SUM(mst_stok_in - mst_stok_out) AS stok_awal
                 FROM tmasterstok_obat
-                WHERE mst_tanggal < ? AND mst_aktif = 'Y'
+                ${saFilter}
                 GROUP BY mst_brg_kode
             ) sa ON o.o_kode = sa.mst_brg_kode
 
@@ -45,7 +69,7 @@ exports.getLaporanStokObat = async (startDate, endDate) => {
                     SUM(mst_stok_in) AS terima,
                     SUM(mst_stok_out) AS keluar
                 FROM tmasterstok_obat
-                WHERE (mst_tanggal BETWEEN ? AND ?) AND mst_aktif = 'Y'
+                ${mutFilter}
                 GROUP BY mst_brg_kode
             ) mutasi ON o.o_kode = mutasi.mst_brg_kode
 
@@ -53,8 +77,8 @@ exports.getLaporanStokObat = async (startDate, endDate) => {
             ORDER BY o.o_nama ASC
         `;
 
-        // Masukkan parameter: sDate untuk saldo awal, lalu sDate & eDate untuk mutasi
-        const [rows] = await pool.query(sql, [sDate, sDate, eDate]);
+        // Masukkan parameter sesuai filter yang aktif (kosong => tanpa filter tanggal).
+        const [rows] = await pool.query(sql, [...saParams, ...mutParams]);
         return rows;
 
     } catch (error) {

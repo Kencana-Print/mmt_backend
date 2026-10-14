@@ -30,8 +30,20 @@ exports.updateMutasi = async (req, res) => {
     }
 };
 
-exports.getAllMutasi = async (req, res) => {
+exports.getMutasiDetail = async (req, res) => {
     try {
+        const { nomor } = req.params;
+        const data = await mutasiService.getMutasiGudangDetail(nomor);
+        if (!data) {
+            return res.status(404).json({ success: false, message: `Data mutasi ${nomor} tidak ditemukan.` });
+        }
+        res.status(200).json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.getAllMutasi = async (req, res) => {    try {
         const { startDate, endDate, search } = req.query;
         if (!startDate || !endDate) {
             return res.status(400).json({ success: false, message: "Filter tanggal (startDate & endDate) diperlukan" });

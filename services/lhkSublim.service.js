@@ -1,9 +1,16 @@
 const pool = require("../config/db.config");
 const { format } = require("date-fns");
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
 const NOMERATOR = "MMT-LHK-R";
 
 const getAllHeaders = async (startDate, endDate) => {
+  const hasDate = isValidDate(startDate) && isValidDate(endDate);
   const sql = `
         SELECT 
             lr_nomor AS nomor, 
@@ -21,11 +28,11 @@ const getAllHeaders = async (startDate, endDate) => {
         FROM tlhk_rtr_hdr 
         LEFT JOIN tGUDANG ON gdg_kode = lr_gdg_kode
         LEFT JOIN tlhk_rtr_dtl ON lrd_lr_nomor = lr_nomor
-        WHERE lr_tanggal BETWEEN ? AND ?
+        ${hasDate ? "WHERE lr_tanggal BETWEEN ? AND ?" : ""}
         GROUP BY lr_nomor, lr_tanggal, lr_gdg_kode, gdg_nama
         ORDER BY lr_tanggal DESC, lr_nomor DESC
     `;
-  const [rows] = await pool.query(sql, [startDate, endDate]);
+  const [rows] = await pool.query(sql, hasDate ? [startDate, endDate] : []);
   return rows;
 };
 

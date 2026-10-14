@@ -152,7 +152,7 @@ const saveMap = async (req, res) => {
   try {
     const data = req.body;
     const isNewMode = req.body.isNewMode !== false; // default true jika tidak dikirim
-    const userKode = req.user?.kode || "SYSTEM";
+    const userKode = req.user?.kdUser || req.user?.kode || "SYSTEM";
 
     const nomorMap = await mapService.save(data, userKode, isNewMode);
     res.status(200).json({
@@ -231,7 +231,10 @@ const approveCmo = async (req, res) => {
         .json({ success: false, message: "Anda tidak memiliki hak CMO." });
     }
 
-    await mapService.approveCmo(nomor, req.user.kode);
+    await mapService.approveCmo(
+      nomor,
+      req.user?.kdUser || req.user?.kode || "SYSTEM",
+    );
     res.status(200).json({ success: true, message: "Berhasil di-approve." });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });

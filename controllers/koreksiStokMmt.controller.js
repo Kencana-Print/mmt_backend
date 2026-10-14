@@ -10,13 +10,7 @@ const getKoreksiStok = async (req, res) => {
     const { startDate, endDate } = req.query;
 
     try {
-        // Validasi parameter tanggal
-        if (!startDate || !endDate) {
-            return res.status(400).json({
-                status: 'error',
-                message: "Parameter startDate dan endDate diperlukan (Format: YYYY-MM-DD)."
-            });
-        }
+        // Tanggal kosong = tanpa filter (diteruskan ke service yang me-skip klausa tanggal).
 
         // Memanggil service yang menggabungkan master dan detail
         const data = await service.getKoreksiStokData(startDate, endDate);

@@ -8,6 +8,19 @@ const pool = require('../config/db.config');
  */
 exports.getPlanningProduksiData = async (startDate, endDate) => {
     try {
+        // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+        // filter tanggal di-skip (tanpa filter) bila tidak valid.
+        const isDateStr = (v) => typeof v === "string" && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(v));
+        const dateConds = [];
+        const dateParams = [];
+        if (isDateStr(startDate)) {
+            dateConds.push("DATE(s.spk_tanggal) >= ?");
+            dateParams.push(startDate);
+        }
+        if (isDateStr(endDate)) {
+            dateConds.push("DATE(s.spk_tanggal) <= ?");
+            dateParams.push(endDate);
+        }
         // --- 1. Query Master (Persis SQL di Delphi s) ---
         // Menghitung SUM detail di awal agar data master memiliki total status
         const sqlMaster = `
@@ -42,11 +55,11 @@ exports.getPlanningProduksiData = async (startDate, endDate) => {
               AND s.spk_aktif = "Y" 
               AND s.spk_divisi IN (5) 
               AND s.spk_jo_kode IN ("MT")
-              AND DATE(s.spk_tanggal) BETWEEN ? AND ?
+              ${dateConds.length ? "AND " + dateConds.join(" AND ") : ""}
             ORDER BY s.date_create
         `;
 
-        const [masterResults] = await pool.query(sqlMaster, [startDate, endDate]);
+        const [masterResults] = await pool.query(sqlMaster, dateParams);
 
         if (masterResults.length === 0) return [];
 

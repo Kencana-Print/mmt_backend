@@ -5,9 +5,7 @@ const planningService = require('../services/planningProduksi.service');
 exports.getBrowsePlanning = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
-        if (!startDate || !endDate) {
-            return res.status(400).json({ success: false, message: "Parameter tanggal harus diisi" });
-        }
+        // Tanggal kosong = tanpa filter (diteruskan ke service yang me-skip klausa tanggal).
 
         const data = await planningService.getPlanningProduksiData(startDate, endDate);
         

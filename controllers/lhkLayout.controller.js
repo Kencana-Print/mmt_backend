@@ -8,12 +8,7 @@ exports.getLhkLayoutList = async (req, res) => {
     try {
         const { startDate, endDate, search } = req.query;
 
-        if (!startDate || !endDate) {
-            return res.status(400).json({
-                success: false,
-                message: 'Parameter startDate dan endDate wajib disertakan.'
-            });
-        }
+        // Tanggal kosong = tanpa filter (diteruskan ke service yang me-skip klausa tanggal).
 
         const result = await lhkLayoutService.getLhkLayoutList({ startDate, endDate, search });
         

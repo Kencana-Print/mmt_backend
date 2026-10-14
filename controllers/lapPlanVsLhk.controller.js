@@ -6,13 +6,7 @@ exports.getPlanVsLhk = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
 
-        if (!startDate || !endDate) {
-            return res.status(400).json({ 
-                success: false, 
-                message: "Parameter tanggal awal (startDate) dan akhir (endDate) wajib diisi." 
-            });
-        }
-
+        // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
         const reportData = await laporanService.getPlanVsLhkReport(startDate, endDate);
 
         return res.status(200).json({

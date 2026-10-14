@@ -1,6 +1,15 @@
 const pool = require("../config/db.config");
 const { format } = require("date-fns");
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
+const normDate = (v) =>
+  isValidDate(v) ? format(new Date(v), "yyyy-MM-dd") : null;
+
 // Konstanta Nomor Bukti
 const NOMERATOR_MESIN = "MMT-LHK-S"; // Untuk tabel mesinsublim
 const NOMERATOR_APP = "MMT-LHK-SA"; // Untuk tabel sublim (Approval)
@@ -31,10 +40,12 @@ const accLhkPaperprint = async (nomor, user = "SYSTEM") => {
 };
 
 const getAllHeaders = async (startDate, endDate, search = "") => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
 
-  const params = [tglMulai, tglSelesai];
+  const params = [];
+  if (hasDate) params.push(tglMulai, tglSelesai);
 
   let sql = `
     SELECT 
@@ -98,7 +109,7 @@ const getAllHeaders = async (startDate, endDate, search = "") => {
         FROM tlhk_sublim_dtl 
         GROUP BY lsbd_lsb_nomor
     ) x ON x.lsbd_lsb_nomor = t1.lsb_nomor
-    WHERE t1.lsb_tanggal BETWEEN ? AND ?
+    WHERE ${hasDate ? "t1.lsb_tanggal BETWEEN ? AND ?" : "1=1"}
   `;
 
   if (search) {
@@ -466,9 +477,10 @@ const saveLhkMesin = async (data) => {
  * =============================================================================
  */
 const getLookupLhkPaperprint = async (startDate, endDate, search = "") => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
-  const params = [tglMulai, tglSelesai];
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
+  const params = hasDate ? [tglMulai, tglSelesai] : [];
 
   let sql = `
     SELECT 
@@ -487,7 +499,7 @@ const getLookupLhkPaperprint = async (startDate, endDate, search = "") => {
         d.lsbd_poid_size AS Poi_Size
     FROM tlhk_sublim_hdr h
     INNER JOIN tlhk_sublim_dtl d ON h.lsb_nomor = d.lsbd_lsb_nomor
-    WHERE h.lsb_tanggal BETWEEN ? AND ?
+    WHERE ${hasDate ? "h.lsb_tanggal BETWEEN ? AND ?" : "1=1"}
       AND h.lsb_status = 'POSTED' 
       -- 🔥 Hapus filter h.lsb_jenis = 'P' di sini agar data 'S' (Sublim) bisa muncul
   `;
@@ -597,8 +609,9 @@ const saveApproval = async (data) => {
  * Mengambil daftar history Approval (tlhk_sublim_hdr)
  */
 const getAllApprovalHeaders = async (startDate, endDate) => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
 
   const sql = `
         SELECT 
@@ -614,11 +627,11 @@ const getAllApprovalHeaders = async (startDate, endDate) => {
              FROM tlhk_sublim_dtl 
              WHERE lsbd_lsb_nomor = h.lsb_nomor) AS Jumlah_Item
         FROM tlhk_sublim_hdr h
-        WHERE h.lsb_tanggal BETWEEN ? AND ?
+        WHERE ${hasDate ? "h.lsb_tanggal BETWEEN ? AND ?" : "1=1"}
         ORDER BY h.lsb_tanggal DESC, h.lsb_nomor DESC
     `;
 
-  const [rows] = await pool.query(sql, [tglMulai, tglSelesai]);
+  const [rows] = await pool.query(sql, hasDate ? [tglMulai, tglSelesai] : []);
   return rows;
 };
 

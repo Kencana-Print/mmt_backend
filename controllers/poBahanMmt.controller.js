@@ -8,7 +8,7 @@ exports.browsePO = async (req, res) => {
     try {
         const { startDate, endDate, supplier } = req.query;
 
-        if (!startDate || !endDate) return res.status(400).json({ message: "Tanggal mulai dan akhir wajib diisi." });
+        // Tanggal kosong = tanpa filter (diteruskan ke service yang me-skip klausa tanggal).
 
         // Memanggil fungsi dari service
         const data = await poMmtService.getPoMmtData(startDate, endDate, supplier);

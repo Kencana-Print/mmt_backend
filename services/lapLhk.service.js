@@ -1,10 +1,21 @@
 const pool = require("../config/db.config");
 const { format } = require("date-fns");
 
+// Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
+const isValidDate = (v) =>
+  typeof v === "string" &&
+  /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+  !isNaN(new Date(v).getTime());
+
+const normDate = (v) =>
+  isValidDate(v) ? format(new Date(v), "yyyy-MM-dd") : null;
+
 // =========================================================================
 // HELPER: SUBQUERY GABUNGAN (MMT, TEKSTIL, SUBLIM, FINISHING, PAPERPRINT, SUBLIM_RTR)
+// hasDate=false => tiap cabang memakai 1=1 (tanpa filter tanggal, tanpa zero-date)
 // =========================================================================
-const getUnifiedLhkQuery = () => {
+const getUnifiedLhkQuery = (hasDate = true) => {
+  const dc = (col) => (hasDate ? `${col} BETWEEN ? AND ?` : "1=1");
   return `
         SELECT 
             'MMT' AS Kategori,
@@ -29,7 +40,7 @@ const getUnifiedLhkQuery = () => {
             UNION ALL
             SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
         ) x ON x.spk_nomor = d.lcd_spk_nomor
-        WHERE h.lch_tanggal BETWEEN ? AND ?
+        WHERE ${dc("h.lch_tanggal")}
 
         UNION ALL
 
@@ -56,7 +67,7 @@ const getUnifiedLhkQuery = () => {
             UNION ALL
             SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
         ) x ON x.spk_nomor = d.ltd_spk_nomor
-        WHERE h.lth_tanggal BETWEEN ? AND ?
+        WHERE ${dc("h.lth_tanggal")}
 
         UNION ALL
 
@@ -83,7 +94,7 @@ const getUnifiedLhkQuery = () => {
             UNION ALL
             SELECT mspk_nomor, mspk_nama FROM tmemospk
         ) x ON x.spk_nomor = d.lsbd_spk_nomor
-        WHERE h.lsb_tanggal BETWEEN ? AND ?
+        WHERE ${dc("h.lsb_tanggal")}
 
         UNION ALL
 
@@ -110,7 +121,7 @@ const getUnifiedLhkQuery = () => {
             UNION ALL
             SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
         ) x ON x.spk_nomor = d.lfd_spk_nomor
-        WHERE h.lfh_tanggal BETWEEN ? AND ?
+        WHERE ${dc("h.lfh_tanggal")}
 
         UNION ALL
 
@@ -132,7 +143,7 @@ const getUnifiedLhkQuery = () => {
         FROM tlhk_rtr_hdr h
         JOIN tlhk_rtr_dtl d ON h.lr_nomor = d.lrd_lr_nomor
         LEFT JOIN tGUDANG g ON g.gdg_kode = h.lr_gdg_kode
-        WHERE h.lr_tanggal BETWEEN ? AND ?
+        WHERE ${dc("h.lr_tanggal")}
     `;
 };
 
@@ -141,11 +152,12 @@ const getUnifiedLhkQuery = () => {
 // =========================================================================
 
 const getLaporanAgregasi = async (startDate, endDate) => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
-  const dateParams = Array(10).fill([tglMulai, tglSelesai]).flat();
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
+  const dateParams = hasDate ? Array(10).fill([tglMulai, tglSelesai]).flat() : [];
 
-  const unifiedSql = getUnifiedLhkQuery();
+  const unifiedSql = getUnifiedLhkQuery(hasDate);
 
   const sqlMesin = `
         SELECT Mesin, Kategori, SUM(Total_m2) as Total_m2
@@ -181,11 +193,12 @@ const getLaporanAgregasi = async (startDate, endDate) => {
 };
 
 const getRekapLhk = async (startDate, endDate) => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
-  const dateParams = Array(10).fill([tglMulai, tglSelesai]).flat();
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
+  const dateParams = hasDate ? Array(10).fill([tglMulai, tglSelesai]).flat() : [];
 
-  const unifiedSql = getUnifiedLhkQuery();
+  const unifiedSql = getUnifiedLhkQuery(hasDate);
 
   const sqlMesin = `
         SELECT 
@@ -285,10 +298,11 @@ const getExportLhkCrossTab = async (month, year) => {
 };
 
 const getAllDataForExport = async (startDate, endDate, mesin) => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
 
-  let dateParams = Array(10).fill([tglMulai, tglSelesai]).flat();
+  let dateParams = hasDate ? Array(10).fill([tglMulai, tglSelesai]).flat() : [];
   let filterMesin = "";
   let extraParams = [];
 
@@ -302,7 +316,7 @@ const getAllDataForExport = async (startDate, endDate, mesin) => {
     }
   }
 
-  const unifiedSql = getUnifiedLhkQuery();
+  const unifiedSql = getUnifiedLhkQuery(hasDate);
 
   const sql = `
         SELECT 
@@ -329,8 +343,12 @@ const getAllDataForExport = async (startDate, endDate, mesin) => {
 };
 
 const getDetailRekapMesin = async (startDate, endDate, mesin) => {
-  const tglMulai = format(new Date(startDate), "yyyy-MM-dd");
-  const tglSelesai = format(new Date(endDate), "yyyy-MM-dd");
+  const tglMulai = normDate(startDate);
+  const tglSelesai = normDate(endDate);
+  const hasDate = !!(tglMulai && tglSelesai);
+  const dc = hasDate ? "BETWEEN ? AND ?" : "1=1";
+
+  // Buat SQL langsung khusus untuk detail mesin,
 
   // Buat SQL langsung khusus untuk detail mesin,
   // sehingga parameter `?` hanya ada untuk tanggal (2 buah) dan mesin (1 buah) = Total 3 parameter!
@@ -357,7 +375,7 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
                 UNION ALL
                 SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
             ) x ON x.spk_nomor = d.lcd_spk_nomor
-            WHERE h.lch_tanggal BETWEEN ? AND ?
+            WHERE h.lch_tanggal ${dc}
 
             UNION ALL
 
@@ -376,7 +394,7 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
         UNION ALL
         SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
     ) x ON x.spk_nomor = d.ltd_spk_nomor
-    WHERE h.lth_tanggal BETWEEN ? AND ?
+    WHERE h.lth_tanggal ${dc}
 
             UNION ALL
 
@@ -395,7 +413,7 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
                 UNION ALL
                 SELECT mspk_nomor, mspk_nama FROM tmemospk
             ) x ON x.spk_nomor = d.lsbd_spk_nomor
-            WHERE h.lsb_tanggal BETWEEN ? AND ?
+            WHERE h.lsb_tanggal ${dc}
 
             UNION ALL
 
@@ -414,7 +432,7 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
                 UNION ALL
                 SELECT mspk_nomor, mspk_nama, mspk_panjang, mspk_lebar FROM tmemospk
             ) x ON x.spk_nomor = d.lfd_spk_nomor
-            WHERE h.lfh_tanggal BETWEEN ? AND ?
+            WHERE h.lfh_tanggal ${dc}
 
             UNION ALL
 
@@ -428,7 +446,7 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
                 IFNULL(d.lrd_lokasi, 'SB01') AS Mesin
             FROM tlhk_rtr_hdr h
             JOIN tlhk_rtr_dtl d ON h.lr_nomor = d.lrd_lr_nomor
-            WHERE h.lr_tanggal BETWEEN ? AND ?
+            WHERE h.lr_tanggal ${dc}
         ) u
         WHERE u.Mesin = ?
         GROUP BY u.Nomor_SPK, u.Nama_Order, u.Kategori
@@ -438,19 +456,22 @@ const getDetailRekapMesin = async (startDate, endDate, mesin) => {
   // Karena ada 5 blok subquery (masing-masing 2 parameter tanggal = 10 parameter)
   // ditambah 1 parameter `mesin` di klausa WHERE paling bawah,
   // kita susun array parameternya dengan urutan yang diulang 5 kali untuk tanggal, lalu mesin di akhir:
-  const params = [
-    tglMulai,
-    tglSelesai, // MMT
-    tglMulai,
-    tglSelesai, // TEKSTIL
-    tglMulai,
-    tglSelesai, // PAPERPRINT
-    tglMulai,
-    tglSelesai, // FINISHING
-    tglMulai,
-    tglSelesai, // SUBLIM
-    mesin, // u.Mesin = ?
-  ];
+  // Bila tanggal kosong, klausa tanggal menjadi 1=1 (tanpa parameter tanggal).
+  const params = hasDate
+    ? [
+        tglMulai,
+        tglSelesai, // MMT
+        tglMulai,
+        tglSelesai, // TEKSTIL
+        tglMulai,
+        tglSelesai, // PAPERPRINT
+        tglMulai,
+        tglSelesai, // FINISHING
+        tglMulai,
+        tglSelesai, // SUBLIM
+        mesin, // u.Mesin = ?
+      ]
+    : [mesin];
 
   const [rows] = await pool.query(sql, params);
   return rows;

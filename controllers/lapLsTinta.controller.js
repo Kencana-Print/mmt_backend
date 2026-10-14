@@ -4,13 +4,7 @@ exports.getLaporan = async (req, res) => {
     try {
         const { startDate, endDate, gudang } = req.query;
 
-        if (!startDate || !endDate) {
-            return res.status(400).json({
-                success: false,
-                message: "Tanggal mulai dan akhir harus diisi"
-            });
-        }
-
+        // Tanggal boleh kosong: service men-skip klausa tanggal (tanpa zero-date).
         const data = await laporanService.getLaporanStokObat(startDate, endDate, gudang);
 
         res.json({

@@ -109,6 +109,32 @@ exports.getPermintaanProduksiData = async (startDate, endDate, userDivisi) => {
     const divisi = Number(userDivisi);
     const DATE_FORMAT_SQL = "DATE_FORMAT(??, '%d-%M-%Y')";
 
+    // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+    const dateParamsObat = [];
+    let dateClauseObat = "1=1";
+    if (startDate && endDate) {
+      dateClauseObat = `h.promin_tanggal BETWEEN ? AND ?`;
+      dateParamsObat.push(startDate, endDate);
+    } else if (startDate) {
+      dateClauseObat = `h.promin_tanggal >= ?`;
+      dateParamsObat.push(startDate);
+    } else if (endDate) {
+      dateClauseObat = `h.promin_tanggal <= ?`;
+      dateParamsObat.push(endDate);
+    }
+    const dateParamsMmt = [];
+    let dateClauseMmt = "1=1";
+    if (startDate && endDate) {
+      dateClauseMmt = `h.mnt_tanggal BETWEEN ? AND ?`;
+      dateParamsMmt.push(startDate, endDate);
+    } else if (startDate) {
+      dateClauseMmt = `h.mnt_tanggal >= ?`;
+      dateParamsMmt.push(startDate);
+    } else if (endDate) {
+      dateClauseMmt = `h.mnt_tanggal <= ?`;
+      dateParamsMmt.push(endDate);
+    }
+
     if (divisi === 4) {
       sqlMaster = `
                 SELECT
@@ -119,7 +145,7 @@ exports.getPermintaanProduksiData = async (startDate, endDate, userDivisi) => {
                     h.promin_ket AS Keterangan,
                     'OBAT' AS Tipe
                 FROM tobatproduksiminta_hdr h
-                WHERE h.promin_tanggal BETWEEN ? AND ?
+                WHERE ${dateClauseObat}
                 ORDER BY h.promin_tanggal DESC;
             `;
 
@@ -146,7 +172,7 @@ exports.getPermintaanProduksiData = async (startDate, endDate, userDivisi) => {
                     'MMT' AS Tipe
                 FROM tminta_mmt_hdr h
                 LEFT JOIN tgudang g ON g.gdg_kode = h.mnt_gdg_kode
-                WHERE h.mnt_tanggal BETWEEN ? AND ? ${filterDivisi}
+                WHERE ${dateClauseMmt} ${filterDivisi}
                 ORDER BY h.mnt_tanggal DESC;
             `;
 
@@ -161,7 +187,7 @@ exports.getPermintaanProduksiData = async (startDate, endDate, userDivisi) => {
             `;
     }
 
-    const [masterResults] = await pool.query(sqlMaster, [startDate, endDate]);
+    const [masterResults] = await pool.query(sqlMaster, divisi === 4 ? dateParamsObat : dateParamsMmt);
     if (masterResults.length === 0) return [];
 
     const masterNomors = masterResults.map((row) => row.Nomor);

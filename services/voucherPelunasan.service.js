@@ -99,6 +99,17 @@ exports.saveVoucher = async (data, userLogin) => {
 // ===================================
 exports.getVoucherData = async (startDate, endDate) => {
     try {
+        // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+        const dateConds = [];
+        const dateParams = [];
+        if (startDate) {
+            dateConds.push(`h.vch_tanggal >= ?`);
+            dateParams.push(startDate);
+        }
+        if (endDate) {
+            dateConds.push(`h.vch_tanggal <= ?`);
+            dateParams.push(endDate);
+        }
         const sql = `
             SELECT 
                 h.vch_nomor AS Nomor,
@@ -109,10 +120,10 @@ exports.getVoucherData = async (startDate, endDate) => {
                 h.vch_keterangan AS Keterangan
             FROM tvoucher_pemb_hdr h
             LEFT JOIN tsupplier s ON s.sup_kode = h.vch_sup_kode
-            WHERE h.vch_tanggal BETWEEN ? AND ?
+            WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
             ORDER BY h.vch_tanggal DESC, h.vch_nomor DESC
         `;
-        const [rows] = await pool.query(sql, [startDate, endDate]);
+        const [rows] = await pool.query(sql, dateParams);
         return rows;
     } catch (error) {
         throwDbError('Gagal mengambil daftar voucher', error);

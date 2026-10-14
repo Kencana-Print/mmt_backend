@@ -1,5 +1,11 @@
 const service = require("../services/komitmenkirim.service");
 
+// Payload JWT MMT memakai kdUser/nmUser (bukan kode/nama ala Manksi) —
+// petakan di sini agar ownership, presence, dan emit userKode akurat.
+const userKodeOf = (req) =>
+  req.user?.kdUser || req.user?.kode || req.user?.user_kode || "SYSTEM";
+const userBagianOf = (req) => req.user?.bagian || "";
+
 const getBrowse = async (req, res) => {
   try {
     const { startDate, endDate, cabang } = req.query;
@@ -92,7 +98,7 @@ const savePencapaian = async (req, res) => {
 
 const getUnnotifiedMap = async (req, res) => {
   try {
-    const userKode = req.user?.kode || req.user?.user_kode || "";
+    const userKode = userKodeOf(req);
     const data = await service.getUnnotifiedMap(userKode);
     res.json({ success: true, data });
   } catch (e) {
@@ -103,7 +109,7 @@ const getUnnotifiedMap = async (req, res) => {
 const markMapNotified = async (req, res) => {
   try {
     const { ids } = req.body;
-    const userKode = req.user?.kode || "";
+    const userKode = userKodeOf(req);
     await service.markMapNotified(ids, userKode);
     res.json({ success: true });
   } catch (e) {
@@ -113,8 +119,8 @@ const markMapNotified = async (req, res) => {
 
 const createHeader = async (req, res) => {
   try {
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
     const data = await service.createHeader(req.body, userKode, userBagian);
     res.json({ success: true, data });
   } catch (e) {
@@ -126,10 +132,17 @@ const updateHeaderField = async (req, res) => {
   try {
     const { nomor } = req.params;
     const { field, value } = req.body;
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
-    await service.updateHeaderField(nomor, field, value, userKode, userBagian);
-    res.json({ success: true });
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
+    const data = await service.updateHeaderField(
+      nomor,
+      field,
+      value,
+      userKode,
+      userBagian,
+    );
+    req.app.get("io").to(nomor).emit("pjw:header-updated", data);
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -213,9 +226,18 @@ const getPenawaranItemInfo = async (req, res) => {
 const addDetailRow = async (req, res) => {
   try {
     const { pjwNomor } = req.params;
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
-    const data = await service.addDetailRow(pjwNomor, req.body, userKode, userBagian);
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
+    const data = await service.addDetailRow(
+      pjwNomor,
+      req.body,
+      userKode,
+      userBagian,
+    );
+    req.app
+      .get("io")
+      .to(pjwNomor)
+      .emit("pjw:row-added", { ...data, row: req.body, userKode });
     res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
@@ -226,10 +248,20 @@ const updateDetailField = async (req, res) => {
   try {
     const { pjwdId } = req.params;
     const { field, value } = req.body;
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
-    await service.updateDetailField(pjwdId, field, value, userKode, userBagian);
-    res.json({ success: true });
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
+    const data = await service.updateDetailField(
+      pjwdId,
+      field,
+      value,
+      userKode,
+      userBagian,
+    );
+    req.app
+      .get("io")
+      .to(data.pjw_nomor)
+      .emit("pjw:field-updated", { ...data, userKode });
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -238,10 +270,11 @@ const updateDetailField = async (req, res) => {
 const deleteDetailRow = async (req, res) => {
   try {
     const { pjwdId } = req.params;
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
-    await service.deleteDetailRow(pjwdId, userKode, userBagian);
-    res.json({ success: true });
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
+    const data = await service.deleteDetailRow(pjwdId, userKode, userBagian);
+    req.app.get("io").to(data.pjw_nomor).emit("pjw:row-deleted", data);
+    res.json({ success: true, data });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }
@@ -260,11 +293,42 @@ const checkTargetPeriod = async (req, res) => {
 const moveDetailRow = async (req, res) => {
   try {
     const { pjwdId } = req.params;
-    const { targetPjwNomor } = req.body;
-    const userKode = req.user?.kode || "SYSTEM";
-    const userBagian = req.user?.bagian || "";
-    await service.moveDetailRowToPeriod(pjwdId, targetPjwNomor, userKode, userBagian);
-    res.json({ success: true });
+    // Kontrak body disamakan Manksi: { pjwNomor, tanggalBaru }.
+    const { pjwNomor, tanggalBaru, targetPjwNomor } = req.body;
+    const userKode = userKodeOf(req);
+    const userBagian = userBagianOf(req);
+    const result = await service.moveDetailRowToPeriod(
+      pjwdId,
+      tanggalBaru ?? targetPjwNomor,
+      userKode,
+      userBagian,
+    );
+    const io = req.app.get("io");
+    if (result.moved) {
+      // Room asal: baris hilang dari situ
+      io.to(result.fromNomor).emit("pjw:row-deleted", {
+        pjwd_id: result.pjwd_id,
+      });
+      // Room tujuan: kirim baris utuh (hasil merge bila digabung) agar
+      // user yang membuka periode tujuan langsung melihatnya.
+      const targetId = result.merged ? result.mergedIntoId : result.pjwd_id;
+      const targetRows = await service.getDetail(result.nomor);
+      const movedRow = (targetRows || []).find(
+        (r) => Number(r.PjwdId) === Number(targetId),
+      );
+      if (movedRow) {
+        io.to(result.nomor).emit("pjw:row-moved-in", movedRow);
+      }
+    } else {
+      // Tidak pindah (tanggal masih dalam rentang) — broadcast biasa
+      io.to(pjwNomor || result.nomor).emit("pjw:field-updated", {
+        pjwd_id: result.pjwd_id,
+        field: "pjwd_tgl_kesepakatan",
+        value: tanggalBaru ?? targetPjwNomor,
+        userKode,
+      });
+    }
+    res.json({ success: true, data: result });
   } catch (e) {
     res.status(400).json({ success: false, message: e.message });
   }

@@ -99,6 +99,18 @@ exports.getInvoicePembelianByNomor = async (nomor) => {
 // ===================================
 exports.getInvoicePembelianData = async (startDate, endDate) => {
     try {
+        // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date.
+        const dateConds = [];
+        const dateParams = [];
+        if (startDate) {
+            dateConds.push(`h.invp_tanggal >= ?`);
+            dateParams.push(startDate);
+        }
+        if (endDate) {
+            dateConds.push(`h.invp_tanggal <= ?`);
+            dateParams.push(endDate);
+        }
+        const dateClause = dateConds.length ? `WHERE ${dateConds.join(" AND ")}` : "";
         // 1. Query Header dengan Subquery Perhitungan Total yang Akurat
         const sqlMaster = `
             SELECT 
@@ -119,11 +131,11 @@ exports.getInvoicePembelianData = async (startDate, endDate) => {
                 ) AS Total
             FROM tinvp_hdr h
             LEFT JOIN tsupplier s ON s.sup_kode = h.invp_sup_kode
-            WHERE h.invp_tanggal BETWEEN ? AND ?
+            ${dateClause}
             ORDER BY h.invp_tanggal DESC
         `;
         
-        const [masterResults] = await pool.query(sqlMaster, [startDate, endDate]);
+        const [masterResults] = await pool.query(sqlMaster, dateParams);
         
         if (masterResults.length === 0) return [];
 

@@ -21,6 +21,18 @@ exports.generateMaxKodePengajuan = async (tanggal) => {
 
 exports.getPengajuanData = async (startDate, endDate, user) => {
   try {
+    // Guard: tanggal kosong ("") di-skip agar tidak jadi klausa zero-date
+    // (format(new Date("")) melempar RangeError, jadi hanya format bila ada).
+    const dateConds = [];
+    const params = [];
+    if (startDate) {
+      dateConds.push(`a.korh_tanggal >= ?`);
+      params.push(format(new Date(startDate), "yyyy-MM-dd"));
+    }
+    if (endDate) {
+      dateConds.push(`a.korh_tanggal <= ?`);
+      params.push(format(new Date(endDate), "yyyy-MM-dd"));
+    }
     const sqlMaster = `
       SELECT 
         a.korh_nomor AS Nomor, 
@@ -39,13 +51,9 @@ exports.getPengajuanData = async (startDate, endDate, user) => {
       FROM tkor_pengajuan_hdr_mmt a
       LEFT JOIN tgudang b ON b.gdg_kode = a.korh_gdg_kode
       LEFT JOIN tkor_type_mmt c ON c.kode = a.korh_type
-      WHERE a.korh_tanggal BETWEEN ? AND ? 
+      WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
       ORDER BY a.korh_tanggal DESC, a.korh_nomor DESC`;
 
-    const params = [
-      format(new Date(startDate), "yyyy-MM-dd"),
-      format(new Date(endDate), "yyyy-MM-dd"),
-    ];
     const [masterRows] = await pool.query(sqlMaster, params);
     if (masterRows.length === 0) return [];
 

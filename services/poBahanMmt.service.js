@@ -70,6 +70,23 @@ const formatDateForPrint = (dateValue) => {
 };
 
 const getPoMmtData = async (startDate, endDate, supplier) => {
+  // Guard: tanggal kosong/invalid TIDAK boleh jadi klausa zero-date —
+  // filter tanggal di-skip (tanpa filter) bila tidak valid.
+  const isDateStr = (v) =>
+    typeof v === "string" &&
+    /^\d{4}-\d{2}-\d{2}$/.test(v) &&
+    !Number.isNaN(Date.parse(v));
+  const dateConds = [];
+  const params = [];
+  if (isDateStr(startDate)) {
+    dateConds.push("h.po_tanggal >= ?");
+    params.push(startDate);
+  }
+  if (isDateStr(endDate)) {
+    dateConds.push("h.po_tanggal <= ?");
+    params.push(endDate);
+  }
+
   const sql = `
     SELECT
       h.po_nomor AS Nomor, 
@@ -107,12 +124,11 @@ const getPoMmtData = async (startDate, endDate, supplier) => {
       h.po_memo AS Keterangan
     FROM tpo_mmt_hdr h
     LEFT JOIN tsupplier s ON h.po_sup_kode = s.sup_kode
-    WHERE h.po_tanggal BETWEEN ? AND ?
+    WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
     ${supplier ? `AND (h.po_sup_kode LIKE ? OR s.sup_nama LIKE ?)` : ""}
     ORDER BY h.po_tanggal DESC, h.po_nomor DESC
   `;
 
-  const params = [startDate, endDate];
   if (supplier) params.push(`%${supplier}%`, `%${supplier}%`);
 
   try {

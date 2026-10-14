@@ -4,13 +4,8 @@ const getReport = async (req, res) => {
     try {
         const { startDate, endDate } = req.query;
 
-        if (!startDate || !endDate) {
-            return res.status(400).json({
-                status: false,
-                message: "Parameter startDate dan endDate harus diisi (YYYY-MM-DD)"
-            });
-        }
-
+        // Tanggal boleh kosong (filter dikosongkan dari DateRangeFilter):
+        // service men-skip klausa tanggal bila kosong, tanpa zero-date.
         const data = await mmtService.getLaporanBarangJadi(startDate, endDate);
         
         res.json({
