@@ -648,50 +648,80 @@ const getBsRate = async () => {
 /**
  * Ringkasan SPK aktif: total, lewat dateline, deadline hari ini,
  * segera (H-7), tanpa dateline + per cabang + 10 paling mendesak.
- * Aktif = spk_close = 0 AND spk_aktif = 'Y'.
+ *
+ * Definisi AKTIF (revisi user): flag terbuka (close=0, aktif=Y) DAN
+ * BELUM selesai fisik. Selesai fisik = sudah ada LHK produksi DAN sudah
+ * ada SJ pengiriman — flag close DB terbukti tidak terpelihara (ribuan
+ * SPK lama yang sudah terkirim masih open). Yang sudah selesai fisik
+ * tidak dihitung di total maupun bucket, melainkan dilaporkan terpisah
+ * sebagai kandidat closing massal.
+ * (Pencocokan nomor exact agar index terpakai; nomor sistem aman spasi.)
  */
+const PROD_JOIN_SQL = `
+    LEFT JOIN (
+        SELECT ld_spk_nomor AS spk FROM tlhk_mesin_dtl GROUP BY ld_spk_nomor
+        UNION
+        SELECT ltd_spk_nomor AS spk FROM tlhk_tekstilmmt_dtl GROUP BY ltd_spk_nomor
+        UNION
+        SELECT lprd_spk_nomor AS spk FROM tlhk_proofmmt_dtl GROUP BY lprd_spk_nomor
+        UNION
+        SELECT lsbd_spk_nomor AS spk FROM tlhk_sublim_dtl GROUP BY lsbd_spk_nomor
+        UNION
+        SELECT lfd_spk_nomor AS spk FROM tlhk_finishingmmt_dtl GROUP BY lfd_spk_nomor
+        UNION
+        SELECT lcd_spk_nomor AS spk FROM tlhk_cetakmmt_dtl GROUP BY lcd_spk_nomor
+    ) prod ON prod.spk = t.spk_nomor`;
+const SHIP_JOIN_SQL = `
+    LEFT JOIN (
+        SELECT SJD_SPK_Nomor AS spk FROM tsj_dtl GROUP BY SJD_SPK_Nomor
+    ) ship ON ship.spk = t.spk_nomor`;
+// Fisik masih terbuka = belum (produksi DAN terkirim).
+const FISIK_OPEN_SQL = `AND NOT (prod.spk IS NOT NULL AND ship.spk IS NOT NULL)`;
+const FISIK_DONE_SQL = `AND prod.spk IS NOT NULL AND ship.spk IS NOT NULL`;
+
 const getSpkAktif = async () => {
-    const base = `FROM tspk WHERE spk_close = 0 AND spk_aktif = 'Y'`;
+    // Definisi user: SPK MMT (cab P05), flag terbuka, dan lewat =
+    // dateline lampau dari hari ini. Filter fisik (LHK+SJ) tetap dipakai
+    // agar yang sudah selesai fisik tak dihitung (keluhan sebelumnya).
+    const fromWhere = (extra) => `FROM tspk t ${PROD_JOIN_SQL} ${SHIP_JOIN_SQL}
+        WHERE t.spk_cab = 'P05' AND t.spk_close = 0 AND t.spk_aktif = 'Y'${extra ? ` ${extra}` : ''}`;
     try {
         const [[s]] = await pool.query(
             `SELECT COUNT(*) AS total,
-                    SUM(spk_dateline IS NOT NULL AND spk_dateline < CURDATE()) AS lewat,
-                    SUM(spk_dateline IS NOT NULL AND spk_dateline < CURDATE()
-                        AND spk_dateline >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS lewatMendesak,
-                    SUM(spk_dateline IS NOT NULL AND spk_dateline < DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS tunggakanLama,
-                    SUM(spk_dateline IS NOT NULL AND DATE(spk_dateline) = CURDATE()) AS hariIni,
-                    SUM(spk_dateline IS NOT NULL AND spk_dateline > CURDATE()
-                        AND spk_dateline <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)) AS segera,
-                    SUM(spk_dateline IS NULL) AS tanpaDateline
-             ${base}`
+                    SUM(t.spk_dateline IS NOT NULL AND t.spk_dateline < CURDATE()) AS lewat,
+                    SUM(t.spk_dateline IS NOT NULL AND t.spk_dateline < CURDATE()
+                        AND t.spk_dateline >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS lewatMendesak,
+                    SUM(t.spk_dateline IS NOT NULL AND t.spk_dateline < DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS tunggakanLama,
+                    SUM(t.spk_dateline IS NOT NULL AND DATE(t.spk_dateline) = CURDATE()) AS hariIni,
+                    SUM(t.spk_dateline IS NOT NULL AND t.spk_dateline > CURDATE()
+                        AND t.spk_dateline <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)) AS segera,
+                    SUM(t.spk_dateline IS NULL) AS tanpaDateline
+             ${fromWhere(FISIK_OPEN_SQL)}`
         );
-        const [cab] = await pool.query(
-            `SELECT spk_cab AS Cabang, COUNT(*) AS Total,
-                    SUM(spk_dateline IS NOT NULL AND spk_dateline < CURDATE()
-                        AND spk_dateline >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)) AS Mendesak
-             ${base}
-             GROUP BY spk_cab
-             ORDER BY Total DESC`
+        const [[done]] = await pool.query(
+            `SELECT COUNT(*) AS n ${fromWhere(FISIK_DONE_SQL)}`
         );
         const [top] = await pool.query(
-            `SELECT spk_nomor AS Nomor, spk_nama AS Nama, spk_cab AS Cabang,
-                    DATE_FORMAT(spk_dateline, '%Y-%m-%d') AS Dateline,
-                    spk_jumlah AS Jumlah,
-                    DATEDIFF(spk_dateline, CURDATE()) AS SisaHari
-             ${base} AND spk_dateline IS NOT NULL
-              AND spk_dateline >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
-             ORDER BY spk_dateline ASC
+            `SELECT t.spk_nomor AS Nomor, t.spk_nama AS Nama, t.spk_cab AS Cabang,
+                    DATE_FORMAT(t.spk_dateline, '%Y-%m-%d') AS Dateline,
+                    t.spk_jumlah AS Jumlah,
+                    DATEDIFF(t.spk_dateline, CURDATE()) AS SisaHari
+             ${fromWhere(`${FISIK_OPEN_SQL}
+              AND t.spk_dateline IS NOT NULL
+              AND t.spk_dateline >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)`)}
+             ORDER BY t.spk_dateline ASC
              LIMIT 10`
         );
+        const num = (v) => Number(v) || 0;
         return {
-            total: Number(s.total) || 0,
-            lewat: Number(s.lewat) || 0,
-            lewatMendesak: Number(s.lewatMendesak) || 0,
-            tunggakanLama: Number(s.tunggakanLama) || 0,
-            hariIni: Number(s.hariIni) || 0,
-            segera: Number(s.segera) || 0,
-            tanpaDateline: Number(s.tanpaDateline) || 0,
-            perCabang: cab,
+            total: num(s.total),
+            lewat: num(s.lewat),
+            lewatMendesak: num(s.lewatMendesak),
+            tunggakanLama: num(s.tunggakanLama),
+            hariIni: num(s.hariIni),
+            segera: num(s.segera),
+            tanpaDateline: num(s.tanpaDateline),
+            selesaiFisik: num(done.n),
             top,
         };
     } catch (error) {
