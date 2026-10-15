@@ -56,10 +56,71 @@ const getGrafikBsBulanan = async (req, res) => {
     }
 };
 
+const getFunnelProduksi = async (req, res) => {
+    try {
+        const { startDate, endDate } = req.query;
+        const data = await dashboardService.getFunnelProduksi(startDate, endDate);
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getKomitmenAktif = async (req, res) => {
+    try {
+        const data = await dashboardService.getKomitmenAktif();
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getStokMenipis = async (req, res) => {
+    try {
+        const data = await dashboardService.getStokMenipis();
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getJadwalTerlambat = async (req, res) => {
+    try {
+        const data = await dashboardService.getJadwalTerlambat();
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getBsRate = async (req, res) => {
+    try {
+        const data = await dashboardService.getBsRate();
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+const getSpkAktif = async (req, res) => {
+    try {
+        const data = await dashboardService.getSpkAktif();
+        res.json({ success: true, data });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 module.exports = {
     getTopDeadlineCetak,
     getPermintaanBahanPending,
     getPermintaanBahanPendingTotal,
     getTopDeadlineCetakTotal,
-    getGrafikBsBulanan
+    getGrafikBsBulanan,
+    getFunnelProduksi,
+    getKomitmenAktif,
+    getStokMenipis,
+    getJadwalTerlambat,
+    getBsRate,
+    getSpkAktif
 };

@@ -44,8 +44,37 @@ exports.quickCheck = async (req, res) => {
     }
 };
 
-exports.getInventoryList = async (req, res) => {
+/**
+ * Controller riwayat pergerakan satu barcode (kartu stok per roll).
+ */
+exports.getHistory = async (req, res) => {
     try {
+        const { barcode } = req.query;
+        if (!barcode || !String(barcode).trim()) {
+            return res.status(400).json({
+                success: false,
+                message: "Barcode tidak boleh kosong!"
+            });
+        }
+        const data = await searchService.getBarcodeHistory(barcode);
+        if (!data) {
+            return res.status(404).json({
+                success: false,
+                message: `Barcode ${barcode} tidak memiliki riwayat pergerakan.`
+            });
+        }
+        res.status(200).json({ success: true, data: data });
+    } catch (error) {
+        console.error("Error pada getHistory:", error.message);
+        res.status(500).json({
+            success: false,
+            message: "Terjadi kesalahan internal server.",
+            error: error.message
+        });
+    }
+};
+
+exports.getInventoryList = async (req, res) => {    try {
         // 1. Ambil brg_kode DAN gdg_kode dari query string (?brg_kode=xxx&gdg_kode=yyy)
         const { brg_kode, gdg_kode } = req.query; 
         

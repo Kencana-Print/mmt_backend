@@ -65,8 +65,8 @@ exports.savePO = async (req, res) => {
             nomorToEdit = null;
         }
 
-        // Ambil user yang sedang aktif
-        const currentUser = req.user ? req.user.KDUSER : data.user || 'SYSTEM';
+        // Ambil user yang sedang aktif (utamakan JWT; fallback payload frontend)
+        const currentUser = req.user?.kdUser || req.user?.KDUSER || data.user || 'SYSTEM';
 
         // 3. Validasi data sebelum masuk ke database
         if (!data.supKode || !data.detail || !data.detail.some(d => d.kode && d.jumlah > 0)) {
@@ -217,7 +217,7 @@ exports.getPODetail = async (req, res) => {
 exports.accManagerPO = async (req, res) => {
   try {
     const { nomor } = req.params;
-    const user = req.user?.KDUSER || 'SYSTEM';
+    const user = req.user?.kdUser || req.user?.KDUSER || 'SYSTEM';
 
     if (req.user?.user_manager !== 1) {
       return res.status(403).json({ message: 'Hanya Manager yang boleh ACC PO' });

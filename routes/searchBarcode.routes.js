@@ -11,6 +11,10 @@ router.get('/quick-check', searchController.quickCheck);
 
 router.get('/list', searchController.getInventoryList);
 
+// Riwayat pergerakan satu barcode (kartu stok per roll).
+// Ditaruh sebelum '/:param' generik bila ada, agar tidak tertukar.
+router.get('/history', searchController.getHistory);
+
 // Kamu bisa menambahkan route pencarian lainnya di sini nanti, 
 // misalnya pencarian berdasarkan nama barang atau kategori.
 // router.get('/by-name', searchController.findByName);

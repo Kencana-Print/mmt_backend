@@ -39,6 +39,19 @@ const verifyToken = (req, res, next) => {
         });
 
         req.user = decoded; // <-- PENTING
+
+        // Normalisasi alias identitas: payload JWT MMT memakai
+        // kdUser/nmUser/cab, sedangkan banyak controller memakai
+        // kode/nama/username/cabang/user_kode. Tanpa alias ini semuanya
+        // jatuh ke fallback "SYSTEM" sehingga user_create/user_modified
+        // tidak sesuai user yang login (mis. LIA tercatat SYSTEM).
+        // Hanya mengisi yang kosong — tidak menimpa field asli.
+        const u = req.user;
+        u.kode = u.kode ?? u.kdUser;
+        u.nama = u.nama ?? u.nmUser;
+        u.username = u.username ?? u.kdUser;
+        u.user_kode = u.user_kode ?? u.kdUser ?? u.kode;
+        u.cabang = u.cabang ?? u.cab;
         next();
 
     } catch (err) {

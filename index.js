@@ -77,6 +77,16 @@ const lapMonBSRoutes = require("./routes/lapMonBS.route"); // <- Ditambahkan di 
 const mutasiBahanRoutes = require("./routes/spanduk/mutasiBahan.routes"); // <- Ditambahkan di sini
 const permintaanBahanSpandukRoutes = require("./routes/spanduk/permintaanBahan.routes"); // <- Ditambahkan di sini
 const masterBahanSpandukRoutes = require("./routes/spanduk/masterBahanSpanduk.routes");
+const lhkCetakSpandukRoutes = require("./routes/spanduk/lhkCetakSpanduk.routes");
+const lhkJahitSpandukRoutes = require("./routes/spanduk/lhkJahitSpanduk.routes");
+const lhkLipatSpandukRoutes = require("./routes/spanduk/lhkLipatSpanduk.routes");
+const lhkQuiringSpandukRoutes = require("./routes/spanduk/lhkQuiringSpanduk.routes");
+const lhkProofSpandukRoutes = require("./routes/spanduk/lhkProofSpanduk.routes");
+const lhkAfdrukSpandukRoutes = require("./routes/spanduk/lhkAfdrukSpanduk.routes");
+const lhkHapusPlangkanSpandukRoutes = require("./routes/spanduk/lhkHapusPlangkanSpanduk.routes");
+const lhkDesignProofSpandukRoutes = require("./routes/spanduk/lhkDesignProofSpanduk.routes");
+const rekapLhkSpandukRoutes = require("./routes/spanduk/rekapLhkSpanduk.routes");
+const lhkPlotterSpandukRoutes = require("./routes/spanduk/lhkPlotterSpanduk.routes");
 const penerimaanBahanPenolongRoutes = require("./routes/spanduk/penerimaanBahanPenolong.routes");
 const lapKartuStokMmtRoutes = require("./routes/lapKartuStokMmt.routes");
 const lapMonJadwalKirimRoutes = require("./routes/lapMonJadwalKirim.routes");
@@ -251,6 +261,16 @@ app.use(
   permintaanBahanSpandukRoutes,
 );
 app.use("/api/spanduk/master-bahan", clientCertAuth, masterBahanSpandukRoutes);
+app.use("/api/spanduk/lhk-cetak", clientCertAuth, lhkCetakSpandukRoutes);
+app.use("/api/spanduk/lhk-jahit", clientCertAuth, lhkJahitSpandukRoutes);
+app.use("/api/spanduk/lhk-lipat", clientCertAuth, lhkLipatSpandukRoutes);
+app.use("/api/spanduk/lhk-quiring", clientCertAuth, lhkQuiringSpandukRoutes);
+app.use("/api/spanduk/lhk-proof", clientCertAuth, lhkProofSpandukRoutes);
+app.use("/api/spanduk/lhk-afdruk", clientCertAuth, lhkAfdrukSpandukRoutes);
+app.use("/api/spanduk/lhk-hapus-plangkan", clientCertAuth, lhkHapusPlangkanSpandukRoutes);
+app.use("/api/spanduk/lhk-design-proof", clientCertAuth, lhkDesignProofSpandukRoutes);
+app.use("/api/spanduk/rekap-lhk", clientCertAuth, rekapLhkSpandukRoutes);
+app.use("/api/spanduk/lhk-plotter", clientCertAuth, lhkPlotterSpandukRoutes);
 app.use(
   "/api/spanduk/penerimaan-bahan",
   clientCertAuth,

@@ -10,5 +10,11 @@ router.get('/top-10-deadline-total', dashboardController.getTopDeadlineCetakTota
 router.get('/permintaan-pending', dashboardController.getPermintaanBahanPending);
 router.get('/permintaan-pending-total', dashboardController.getPermintaanBahanPendingTotal);
 router.get('/grafik-bulanan', dashboardController.getGrafikBsBulanan);
+router.get('/funnel-produksi', dashboardController.getFunnelProduksi);
+router.get('/komitmen-aktif', dashboardController.getKomitmenAktif);
+router.get('/stok-menipis', dashboardController.getStokMenipis);
+router.get('/jadwal-terlambat', dashboardController.getJadwalTerlambat);
+router.get('/bs-rate', dashboardController.getBsRate);
+router.get('/spk-aktif', dashboardController.getSpkAktif);
 
 module.exports = router;

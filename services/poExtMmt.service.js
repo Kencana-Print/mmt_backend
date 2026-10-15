@@ -267,15 +267,15 @@ const savePoExternal = async (payload, currentUser) => {
   try {
     await connection.beginTransaction();
 
+    const userAktif = currentUser || payload.currentUser || "SYSTEM";
+
     let nomorPo = payload.poe_nomor;
     const isEditMode = Boolean(payload.isEditMode);
 
-    // ------------------------------------------------------------
-    // VALIDASI 1: PROTEKSI PEMBAYARAN JIKA DALAM MODE EDIT (getbayar)
-    // ------------------------------------------------------------
+    // 1. Validasi Pembayaran
     if (isEditMode && nomorPo) {
       const [voucherCheck] = await connection.query(
-        `SELECT 1 FROM tvoucher_dtl WHERE v_nota = ? LIMIT 1`,
+        `SELECT 1 FROM tvoucher_dtl WHERE voud_nota = ? LIMIT 1`,
         [nomorPo],
       );
       if (voucherCheck.length > 0) {
@@ -285,14 +285,11 @@ const savePoExternal = async (payload, currentUser) => {
       }
     }
 
-    // ------------------------------------------------------------
-    // VALIDASI 2: PENENTUAN NOMOR OTOMATIS (Sama dengan getmaxnomor di Delphi)
-    // ------------------------------------------------------------
+    // 2. Generate Nomor Otomatis
     if (!isEditMode || !nomorPo) {
-      const currentYear = new Date(payload.poe_tanggal).getFullYear(); // YYYY
+      const currentYear = new Date(payload.poe_tanggal).getFullYear();
       const prefix = `POE.${currentYear}`;
 
-      // Ambil angka urut setelah 8 karakter prefix ('POE.YYYY') menggunakan FOR UPDATE
       const [maxRows] = await connection.query(
         `SELECT IFNULL(MAX(CAST(SUBSTRING(poe_nomor, 9) AS UNSIGNED)), 0) AS max_urut 
          FROM tpoexternal_hdr 
@@ -301,19 +298,17 @@ const savePoExternal = async (payload, currentUser) => {
       );
 
       const nextUrut = (Number(maxRows[0]?.max_urut) || 0) + 1;
-      // Format Hasil: POE.202600001 (5 digit padding)
       nomorPo = `${prefix}${String(nextUrut).padStart(5, "0")}`;
     }
 
-    // ------------------------------------------------------------
-    // LANGKAH 3: UPSERT HEADER UTAMA (tpoexternal_hdr)
-    // ------------------------------------------------------------
+    // 3. UPSERT Header dengan user_create & user_modified dinamis
     const sqlHeader = `
       INSERT INTO tpoexternal_hdr (
         poe_nomor, poe_tanggal, poe_dateline, poe_spk_nomor, poe_cab, 
         poe_sup, poe_ket, poe_finishing, poe_jumlah, poe_tarif, 
-        poe_total, poe_bahansendiri, poe_status, user_create, date_create
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, NOW())
+        poe_total, poe_bahansendiri, poe_status, user_create, date_create,
+        poe_tipe_hitung
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, NOW(), ?)
       ON DUPLICATE KEY UPDATE
         poe_tanggal = VALUES(poe_tanggal),
         poe_dateline = VALUES(poe_dateline),
@@ -326,6 +321,7 @@ const savePoExternal = async (payload, currentUser) => {
         poe_tarif = VALUES(poe_tarif),
         poe_total = VALUES(poe_total),
         poe_bahansendiri = VALUES(poe_bahansendiri),
+        poe_tipe_hitung = VALUES(poe_tipe_hitung),
         user_modified = ?,
         date_modified = NOW()
     `;
@@ -343,8 +339,9 @@ const savePoExternal = async (payload, currentUser) => {
       Number(payload.poe_tarif) || 0,
       Number(payload.poe_total) || 0,
       payload.poe_bahansendiri || "N",
-      currentUser,
-      currentUser,
+      userAktif, // <-- masuk ke user_create saat INSERT baru
+      payload.poe_tipe_hitung === "pcs" ? "pcs" : "meter",
+      userAktif, // <-- masuk ke user_modified saat UPDATE
     ]);
 
     // ------------------------------------------------------------

@@ -69,7 +69,7 @@ const getKoreksiStokDetail = async (req, res) => {
 // DELETE
 const deleteKoreksiStok = async (req, res) => {
     const { nomor } = req.params;
-    const user = req.user?.id || 'SYSTEM';
+    const user = req.user?.kdUser || req.user?.id || 'SYSTEM';
     try {
         await service.deleteKoreksiStok(nomor, user);
         res.status(200).json({ message: "Koreksi Stok berhasil dihapus." });
