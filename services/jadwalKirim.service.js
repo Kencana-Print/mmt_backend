@@ -289,6 +289,11 @@ const saveJadwalKirim = async (data, nomorToEdit, userLogin) => {
        await connection.query("DELETE FROM tjadwalkirim_dtl WHERE nomor_kirim = ?", [currentNomor]);
 
 if (Array.isArray(data.Detail) && data.Detail.length > 0) {
+    // jami = jam input jadwal (server time saat save). Delphi mengisinya
+    // otomatis serupa; frontend tak mengirimnya sehingga selalu kosong.
+    // Hormati nilai eksplisit bila ada (jangan timpa input manual).
+    // (serverTime di file ini string 'yyyy-MM-dd HH:mm:ss' → pakai Date baru.)
+    const jamSave = format(new Date(), 'HH:mm:ss');
     const detailValues = data.Detail
         .filter(d => (Number(d.qty) || 0) > 0) 
         .map((d, index) => [
@@ -299,7 +304,7 @@ if (Array.isArray(data.Detail) && data.Detail.length > 0) {
             d.size || '',        // size (5)
             parseFloat(d.qty) || 0, // jumlah (6)
             parseInt(d.koli) || 0,  // koli (7)
-            d.jamInput || '',    // jami (8)
+            (d.jamInput || '').trim() || jamSave, // jami (8) = jam input/save
             d.jamReady || '',    // Jam (9)
             d.expedisi || ''     // expedisi (10)
         ]);

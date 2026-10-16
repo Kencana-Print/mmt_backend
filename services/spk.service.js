@@ -404,6 +404,7 @@ exports.getSpkForJadwalKirimLookup = async (keyword) => {
                         JSON_OBJECT(
                             'urut', spka_urut,
                             'kota', spka_kota,
+                            'toko', spka_toko,
                             'alamat', spka_alamat,
                             'person', spka_person,
                             'hp', spka_hp,
@@ -467,6 +468,7 @@ exports.getAlokasiBySpk = async (nomorSpk) => {
     const sql = `
       SELECT 
         IFNULL(kota, '') AS kota,
+        '' AS toko,
         IFNULL(alamat, '') AS alamat,
         IFNULL(person, '') AS person,
         IFNULL(hp, '') AS hp,
@@ -477,11 +479,12 @@ exports.getAlokasiBySpk = async (nomorSpk) => {
     `;
     const [rows] = await pool.query(sql, [nomorSpk]);
 
-    // Jika kosong di talokasi, fallback cek tspk_alokasi (jika schema berbeda)
+    // Jika kosong di talokasi, fallback cek tspk_alokasi (skema dengan toko)
     if (rows.length === 0) {
       const sqlFallback = `
         SELECT 
           IFNULL(spka_kota, '') AS kota,
+          IFNULL(spka_toko, '') AS toko,
           IFNULL(spka_alamat, '') AS alamat,
           IFNULL(spka_person, '') AS person,
           IFNULL(spka_hp, '') AS hp,
