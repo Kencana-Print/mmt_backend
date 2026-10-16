@@ -44,6 +44,149 @@ exports.getBrowseList = async (startDate, endDate) => {
     }
 };
 
+// Delphi UfrmHasilKerjahapusplangkan.getmaxkode — NOMERATOR 'LHK-HP',
+// format LHK-HP.yymm.NNNN (yymm dari tanggal LHK, bukan tanggal hari ini).
+exports.generateNomor = async (tanggal) => {
+    try {
+        const d = tanggal ? new Date(tanggal) : new Date();
+        const prefix = `LHK-HP.${format(isNaN(d.getTime()) ? new Date() : d, 'yyMM')}.`;
+        const [rows] = await pool.query(
+            'SELECT MAX(RIGHT(lhp_nomor, 4)) AS maxseq FROM tlhk_hapusplangkan_hdr WHERE lhp_nomor LIKE ?',
+            [`${prefix}%`]
+        );
+        const seq = parseInt(rows[0]?.maxseq, 10);
+        const next = Number.isNaN(seq) ? 1 : seq + 1;
+        return `${prefix}${String(10000 + next).slice(-4)}`;
+    } catch (error) {
+        throwDbError('Gagal membuat nomor LHK hapus plangkan di database', error);
+    }
+};
+
+// Form edit: header + details (cermin Delphi loaddata; bahan kimia
+// rinso/porstek/m46/kaporit/caustik ada di DETAIL per SPK, bukan header).
+exports.getFormDetail = async (nomor) => {
+    try {
+        const [hdr] = await pool.query(
+            `SELECT lhp_nomor, lhp_tanggal, lhp_pab_kode, pab_nama
+             FROM tlhk_hapusplangkan_hdr
+             LEFT JOIN tpabrik ON (pab_kode = lhp_pab_kode)
+             WHERE lhp_nomor = ?`,
+            [nomor]
+        );
+        if (!hdr.length) return null;
+        const header = hdr[0];
+        if (header.lhp_tanggal) header.lhp_tanggal = format(new Date(header.lhp_tanggal), 'yyyy-MM-dd');
+        const [details] = await pool.query(
+            `SELECT lhpd_spk_nomor AS spk_nomor, spk_nama,
+                 spk_jumlah AS spk_jumlahorder, spk_panjang, spk_lebar,
+                 lhpd_jml_plangkan AS j_plangkan,
+                 lhpd_rinso AS j_rinso, lhpd_porstek AS j_porstek,
+                 lhpd_m46 AS j_m46, lhpd_kaporit AS j_kaporit,
+                 lhpd_caustik AS j_caustik,
+                 lhpd_ukuran AS ukuran, lhpd_jumlahmeter AS jumlahmeter,
+                 lhpd_keterangan AS keterangan
+             FROM tlhk_hapusplangkan_dtl
+             LEFT JOIN ${SPK_UNION} ON (spk_nomor = lhpd_spk_nomor)
+             WHERE lhpd_lhp_nomor = ?
+             ORDER BY lhpd_nourut`,
+            [nomor]
+        );
+        return { header, details };
+    } catch (error) {
+        throwDbError('Gagal mengambil data form LHK hapus plangkan di database', error);
+    }
+};
+
+// Delphi UfrmHasilKerjahapusplangkan.simpandata — header upsert +
+// hapus-insert details transaksional (lhpd_nourut = urutan baris 1..n).
+// Karyawan/absensi + CDS2 (tlhk_afdruk_dtl_2) SENGAJA DI-SKIP: seluruh
+// bloknya sudah di-comment di Delphi, bukan logika aktif.
+exports.saveData = async (payload, userKode = 'SYSTEM') => {
+    const conn = await pool.getConnection();
+    try {
+        const tanggal = payload.tanggal || format(new Date(), 'yyyy-MM-dd');
+        const pabKode = payload.pab_kode || '';
+        const details = Array.isArray(payload.details)
+            ? payload.details.filter((d) => d && String(d.spk_nomor || '').trim() !== '')
+            : [];
+        if (!details.length) throw new Error('Detail SPK minimal 1 baris.');
+
+        await conn.beginTransaction();
+
+        let nomor = String(payload.nomor || '').trim();
+        if (nomor) {
+            const [exists] = await conn.query(
+                'SELECT lhp_nomor FROM tlhk_hapusplangkan_hdr WHERE lhp_nomor = ?',
+                [nomor]
+            );
+            if (exists.length) {
+                await conn.query(
+                    `UPDATE tlhk_hapusplangkan_hdr SET lhp_tanggal = ?, lhp_pab_kode = ?,
+                         lhp_date_modified = CURDATE(), lhp_user_modified = ?
+                     WHERE lhp_nomor = ?`,
+                    [tanggal, pabKode, userKode, nomor]
+                );
+            } else {
+                await conn.query(
+                    `INSERT INTO tlhk_hapusplangkan_hdr
+                         (lhp_nomor, lhp_tanggal, lhp_pab_kode, lhp_date_Create, lhp_user_create)
+                     VALUES (?, ?, ?, CURDATE(), ?)`,
+                    [nomor, tanggal, pabKode, userKode]
+                );
+            }
+        } else {
+            const d = new Date(tanggal);
+            const prefix = `LHK-HP.${format(isNaN(d.getTime()) ? new Date() : d, 'yyMM')}.`;
+            const [rows] = await conn.query(
+                'SELECT MAX(RIGHT(lhp_nomor, 4)) AS maxseq FROM tlhk_hapusplangkan_hdr WHERE lhp_nomor LIKE ? FOR UPDATE',
+                [`${prefix}%`]
+            );
+            const seq = parseInt(rows[0]?.maxseq, 10);
+            nomor = `${prefix}${String(10000 + (Number.isNaN(seq) ? 1 : seq + 1)).slice(-4)}`;
+            await conn.query(
+                `INSERT INTO tlhk_hapusplangkan_hdr
+                     (lhp_nomor, lhp_tanggal, lhp_pab_kode, lhp_date_Create, lhp_user_create)
+                 VALUES (?, ?, ?, CURDATE(), ?)`,
+                [nomor, tanggal, pabKode, userKode]
+            );
+        }
+
+        await conn.query('DELETE FROM tlhk_hapusplangkan_dtl WHERE lhpd_lhp_nomor = ?', [nomor]);
+        let nourut = 1;
+        for (const dt of details) {
+            await conn.query(
+                `INSERT INTO tlhk_hapusplangkan_dtl
+                     (lhpd_lhp_nomor, lhpd_spk_nomor, lhpd_jml_plangkan,
+                      lhpd_rinso, lhpd_porstek, lhpd_m46, lhpd_kaporit, lhpd_caustik,
+                      lhpd_keterangan, lhpd_ukuran, lhpd_jumlahmeter, lhpd_nourut)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                [
+                    nomor,
+                    String(dt.spk_nomor).trim(),
+                    parseInt(dt.j_plangkan, 10) || 0,
+                    Number(dt.j_rinso) || 0,
+                    Number(dt.j_porstek) || 0,
+                    Number(dt.j_m46) || 0,
+                    Number(dt.j_kaporit) || 0,
+                    Number(dt.j_caustik) || 0,
+                    String(dt.keterangan || ''),
+                    Number(dt.ukuran) || 0,
+                    Number(dt.jumlahmeter) || 0,
+                    nourut++
+                ]
+            );
+        }
+
+        await conn.commit();
+        return { nomor };
+    } catch (error) {
+        await conn.rollback();
+        throw new Error(`Gagal menyimpan LHK hapus plangkan: ${error.message}`);
+    } finally {
+        conn.release();
+    }
+};
+
 // Delphi UfrmBrowseHasilKerjahapusplangkan.btnRefreshClick.SQLDetail + filter nomor:
 // Nomor_SPK/Nama_SPK/Jumlah_Order/Panjang/Lebar/J_Plangkan/J_Meter/Ukuran/
 // Jumlah_Meter/Rinso/Porstek/M46/Kaporit/Caustik/Keterangan.

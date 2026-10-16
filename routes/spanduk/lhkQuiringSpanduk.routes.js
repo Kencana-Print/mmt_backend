@@ -11,4 +11,13 @@ router.get('/browse', quiringController.getBrowse);
 // (didefinisikan setelah /browse agar tidak bentrok)
 router.get('/:nomor/detail', quiringController.getDetail);
 
+// GET form edit: /api/spanduk/lhk-quiring/form/:nomor -> { header, details }
+router.get('/form/:nomor', quiringController.getForm);
+
+// POST form baru: /api/spanduk/lhk-quiring/ (nomor digenerate LHK-Q.YYMM.NNNN)
+router.post('/', quiringController.create);
+
+// PUT form edit: /api/spanduk/lhk-quiring/:nomor
+router.put('/:nomor', quiringController.update);
+
 module.exports = router;

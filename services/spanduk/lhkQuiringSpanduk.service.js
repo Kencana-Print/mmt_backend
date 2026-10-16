@@ -107,3 +107,140 @@ exports.getDetail = async (nomor) => {
         throwDbError(`Gagal mengambil detail LHK Quiring ${nomor}`, error);
     }
 };
+
+// Penomoran Delphi getmaxkode: LHK-Q.YYMM.NNNN
+// (max(right(lqh_nomor,4)) + 1, 10000+1 bila belum ada di bulan tsb).
+const NOMERATOR = "LHK-Q";
+
+const yymmOf = (tanggal) => {
+    const d = tanggal instanceof Date ? tanggal : new Date(String(tanggal || "").substring(0, 10) + "T00:00:00");
+    if (isNaN(d.getTime())) throw new Error("Tanggal LHK tidak valid (harap format yyyy-MM-dd).");
+    return String(d.getFullYear()).slice(-2) + String(d.getMonth() + 1).padStart(2, "0");
+};
+
+const generateNomorTx = async (conn, tanggal) => {
+    const yymm = yymmOf(tanggal);
+    const prefix = `${NOMERATOR}.${yymm}.%`;
+    const [rows] = await conn.query(
+        `SELECT MAX(RIGHT(lqh_nomor, 4)) AS max_num FROM tlhk_quiring_hdr WHERE lqh_nomor LIKE ?`,
+        [prefix]
+    );
+    const currentMax = rows[0]?.max_num ? parseInt(rows[0].max_num, 10) : 0;
+    // Cermin Delphi: RightStr(IntToStr(10000 + max + 1), 4)
+    const nextNum = String(10000 + currentMax + 1).slice(-4);
+    return `${NOMERATOR}.${yymm}.${nextNum}`;
+};
+
+// Penomoran untuk form baru (di luar transaksi; nomor final tetap
+// ditentukan ulang di dalam saveData agar anti-duplikat).
+exports.generateNomor = async (tanggal) => {
+    try {
+        return await generateNomorTx(pool, tanggal || new Date());
+    } catch (error) {
+        throwDbError("Gagal membuat nomor LHK Quiring", error);
+    }
+};
+
+// Data form per nomor: header + detail (join union tspk/tmemospk persis Delphi).
+exports.getFormDetail = async (nomor) => {
+    try {
+        const code = String(nomor || "").trim();
+        if (!code) throw new Error("Nomor LHK wajib diisi.");
+        const [headers] = await pool.query(
+            `SELECT h.lqh_nomor AS Nomor,
+                    DATE_FORMAT(h.lqh_tanggal, '%Y-%m-%d') AS Tanggal,
+                    h.lqh_pab_kode AS Pab_Kode,
+                    p.pab_nama AS Pab_Nama
+               FROM tlhk_quiring_hdr h
+               LEFT JOIN tpabrik p ON p.pab_kode = h.lqh_pab_kode
+              WHERE h.lqh_nomor = ?
+              LIMIT 1`,
+            [code]
+        );
+        if (!headers.length) throw new Error(`LHK Quiring ${code} tidak ditemukan.`);
+        const details = await exports.getDetail(code);
+        return { header: headers[0], details };
+    } catch (error) {
+        throwDbError(`Gagal mengambil form LHK Quiring ${nomor}`, error);
+    }
+};
+
+// Simpan Delphi simpandata: header upsert + hapus-insert detail transaksional.
+// Kolom karyawan (lqh_jkar_harian/borongan, lqh_team_id) TIDAK ditulis —
+// di Delphi assignment-nya di-comment (nonaktif).
+exports.saveData = async (payload = {}, userKode = "SYSTEM") => {
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+
+        const {
+            nomor = "",
+            tanggal = "",
+            pab_kode = "",
+            details = [],
+        } = payload;
+
+        const user = String(userKode || "SYSTEM").substring(0, 20);
+        const tgl = String(tanggal || "").substring(0, 10);
+        if (!isValidDate(tgl)) throw new Error("Tanggal LHK wajib diisi (format yyyy-MM-dd).");
+        const pabKode = String(pab_kode || "").trim();
+        if (!pabKode) throw new Error("Pabrik wajib diisi.");
+
+        const rows = Array.isArray(details)
+            ? details
+                .filter((r) => String(r?.spk_nomor || r?.Nomor_SPK || "").trim() !== "")
+                .map((r) => ({
+                    spk_nomor: String(r.spk_nomor || r.Nomor_SPK || "").trim().substring(0, 20),
+                    koli: Number(r.koli ?? r.J_Koli ?? 0) || 0,
+                    oven: Number(r.oven ?? r.J_Oven ?? 0) || 0,
+                    jemuran: Number(r.jemuran ?? r.J_Jemuran ?? 0) || 0,
+                    potong: Number(r.potong ?? r.J_Potong ?? 0) || 0,
+                }))
+            : [];
+        if (!rows.length) throw new Error("Detail SPK minimal 1 baris (isi No. SPK).");
+
+        const isEdit = String(nomor || "").trim() !== "";
+        let finalNomor = String(nomor || "").trim();
+
+        if (isEdit) {
+            const [res] = await conn.query(
+                `UPDATE tlhk_quiring_hdr
+                    SET lqh_tanggal = ?,
+                        lqh_pab_kode = ?,
+                        lqh_date_modified = CURDATE(),
+                        lqh_user_modified = ?
+                  WHERE lqh_nomor = ?`,
+                [tgl, pabKode, user, finalNomor]
+            );
+            if (!res.affectedRows) throw new Error(`LHK Quiring ${finalNomor} tidak ditemukan.`);
+        } else {
+            finalNomor = await generateNomorTx(conn, tgl);
+            await conn.query(
+                `INSERT INTO tlhk_quiring_hdr
+                     (lqh_nomor, lqh_tanggal, lqh_pab_kode, lqh_date_Create, lqh_user_create)
+                 VALUES (?, ?, ?, CURDATE(), ?)`,
+                [finalNomor, tgl, pabKode, user]
+            );
+        }
+
+        // Cermin Delphi: delete lalu insert ulang semua detail bernomor SPK.
+        await conn.query(`DELETE FROM tlhk_quiring_dtl WHERE lqd_lqh_nomor = ?`, [finalNomor]);
+
+        const sqlInsertDetail = `
+            INSERT INTO tlhk_quiring_dtl
+                (lqd_lqh_nomor, lqd_spk_nomor, lqd_j_koli, lqd_j_oven, lqd_j_jemuran, lqd_j_potong)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `;
+        for (const r of rows) {
+            await conn.query(sqlInsertDetail, [finalNomor, r.spk_nomor, r.koli, r.oven, r.jemuran, r.potong]);
+        }
+
+        await conn.commit();
+        return { nomor: finalNomor };
+    } catch (error) {
+        await conn.rollback();
+        throwDbError("Gagal menyimpan LHK Quiring Spanduk", error);
+    } finally {
+        conn.release();
+    }
+};

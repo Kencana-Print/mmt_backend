@@ -94,3 +94,143 @@ exports.getDetail = async (nomor) => {
         throwDbError('Gagal mengambil detail LHK jahit spanduk di database', error);
     }
 };
+
+// ---------------------------------------------------------------------------
+// FORM INPUT/SAVE (cermin Delphi ufrmHasilKerjaJahit.simpandata + getmaxkode)
+// ---------------------------------------------------------------------------
+const NOMERATOR = 'LHK-J';
+
+const pad4 = (n) => String(10000 + n).slice(-4);
+
+const yymmOf = (tanggal) => {
+    try {
+        return format(new Date(tanggal), 'yyMM');
+    } catch { return format(new Date(), 'yyMM'); }
+};
+
+/**
+ * Penomoran Delphi getmaxkode:
+ *   LHK-J.YYMM.NNNN  (NNNN = max 4 digit kanan + 1 per bulan tanggal dokumen)
+ */
+exports.generateNomor = async (tanggal) => {
+    try {
+        const yymm = yymmOf(tanggal || new Date());
+        const prefix = `${NOMERATOR}.${yymm}.`;
+        const [rows] = await pool.query(
+            `SELECT MAX(RIGHT(ljh_nomor, 4)) AS maxNo FROM tlhk_jahit_hdr WHERE ljh_nomor LIKE ?`,
+            [`${prefix}%`]
+        );
+        const maxNo = parseInt(rows[0]?.maxNo, 10);
+        const next = Number.isFinite(maxNo) ? maxNo + 1 : 1;
+        return `${prefix}${pad4(next)}`;
+    } catch (error) {
+        throwDbError('Gagal membuat nomor LHK jahit spanduk di database', error);
+    }
+};
+
+/**
+ * Data form edit: header + details (detail memakai DETAIL_SELECT verbatim).
+ */
+exports.getFormDetail = async (nomor) => {
+    try {
+        const [hdr] = await pool.query(
+            `SELECT h.ljh_nomor AS Nomor, h.ljh_tanggal AS Tanggal,
+                h.ljh_pab_kode AS Kode_Pabrik, p.pab_nama AS Nama_Pabrik
+             FROM tlhk_jahit_hdr h
+             LEFT JOIN tpabrik p ON (p.pab_kode = h.ljh_pab_kode)
+             WHERE h.ljh_nomor = ?`,
+            [nomor]
+        );
+        if (!hdr.length) return null;
+        if (hdr[0].Tanggal) hdr[0].Tanggal = fmtDate(hdr[0].Tanggal);
+        const details = await exports.getDetail(nomor);
+        return { header: hdr[0], details };
+    } catch (error) {
+        throwDbError('Gagal mengambil data form LHK jahit spanduk di database', error);
+    }
+};
+
+/**
+ * Simpan form: header upsert + hapus-insert details dalam transaksi.
+ * Cermin Delphi simpandata (insert/update hdr, delete + insert dtl per SPK).
+ *
+ * SENGAJA DI-SKIP: tlhk_jahit_dtl_2 (rincian karyawan per SPK) — lihat GAP
+ * di laporan. Tabel dtl_2 yang sudah ada TIDAK dihapus/diubah.
+ */
+exports.saveData = async (payload, userKode) => {
+    const tanggal = payload?.tanggal;
+    const pabKode = (payload?.pabKode || '').trim();
+    const rawDetails = Array.isArray(payload?.details) ? payload.details : [];
+
+    if (!tanggal) throw new Error('Tanggal wajib diisi.');
+    if (!pabKode) throw new Error('Kode pabrik wajib diisi.');
+    const details = rawDetails.filter((d) => (d?.spkNomor || '').trim() !== '');
+    if (!details.length) throw new Error('Detail SPK minimal 1 baris.');
+    const seen = new Set();
+    for (const d of details) {
+        const k = d.spkNomor.trim();
+        if (seen.has(k)) throw new Error(`Nomor SPK ${k} duplikat (Delphi menolak uraian yang sama).`);
+        seen.add(k);
+    }
+
+    const conn = await pool.getConnection();
+    try {
+        await conn.beginTransaction();
+        let nomor = (payload?.nomor || '').trim();
+        const isEdit = !!nomor;
+
+        if (!isEdit) {
+            // Penomoran memakai YYMM dari tanggal dokumen (cermin getmaxkode).
+            const yymm = yymmOf(tanggal);
+            const prefix = `${NOMERATOR}.${yymm}.`;
+            const [r] = await conn.query(
+                `SELECT MAX(RIGHT(ljh_nomor, 4)) AS maxNo FROM tlhk_jahit_hdr WHERE ljh_nomor LIKE ? FOR UPDATE`,
+                [`${prefix}%`]
+            );
+            const maxNo = parseInt(r[0]?.maxNo, 10);
+            nomor = `${prefix}${pad4(Number.isFinite(maxNo) ? maxNo + 1 : 1)}`;
+            await conn.query(
+                `INSERT INTO tlhk_jahit_hdr
+                 (ljh_nomor, ljh_tanggal, ljh_pab_kode, ljh_date_Create, ljh_user_create)
+                 VALUES (?, ?, ?, CURDATE(), ?)`,
+                [nomor, tanggal, pabKode, userKode || 'SYSTEM']
+            );
+        } else {
+            const [exists] = await conn.query(
+                `SELECT ljh_nomor FROM tlhk_jahit_hdr WHERE ljh_nomor = ? FOR UPDATE`,
+                [nomor]
+            );
+            if (!exists.length) throw new Error(`Nomor ${nomor} tidak ditemukan.`);
+            await conn.query(
+                `UPDATE tlhk_jahit_hdr SET ljh_tanggal = ?, ljh_pab_kode = ?,
+                 ljh_Date_modified = CURDATE(), ljh_user_modified = ?
+                 WHERE ljh_nomor = ?`,
+                [tanggal, pabKode, userKode || 'SYSTEM', nomor]
+            );
+            await conn.query(`DELETE FROM tlhk_jahit_dtl WHERE ljd_ljh_nomor = ?`, [nomor]);
+        }
+
+        for (const d of details) {
+            await conn.query(
+                `INSERT INTO tlhk_jahit_dtl
+                 (ljd_ljh_nomor, ljd_spk_nomor, ljd_qty_jahit, ljd_tambah_jahit, ljd_tambah_tali)
+                 VALUES (?, ?, ?, ?, ?)`,
+                [
+                    nomor,
+                    d.spkNomor.trim(),
+                    parseInt(d.qtyJahit, 10) || 0,
+                    parseFloat(d.tambahJahit) || 0,
+                    parseInt(d.tambahTali, 10) || 0,
+                ]
+            );
+        }
+
+        await conn.commit();
+        return { nomor, isEdit };
+    } catch (error) {
+        try { await conn.rollback(); } catch { /* abaikan */ }
+        throw new Error(`Gagal menyimpan LHK jahit spanduk: ${error.message}`);
+    } finally {
+        conn.release();
+    }
+};
