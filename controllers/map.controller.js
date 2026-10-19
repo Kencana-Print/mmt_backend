@@ -289,6 +289,16 @@ const updateDesignStatus = async (req, res) => {
   }
 };
 
+const getKomponenByMap = async (req, res) => {
+  try {
+    const { nomor } = req.params;
+    const data = await mapService.getKomponenByMap(nomor);
+    res.status(200).json({ success: true, data });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 module.exports = {
   getBrowseList,
   getInitGrids,
@@ -308,4 +318,5 @@ module.exports = {
   requestPin5,
   getDesignList,
   updateDesignStatus,
+  getKomponenByMap,
 };

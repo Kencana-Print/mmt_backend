@@ -980,6 +980,20 @@ const processImage = async (tempFilePath, cabang, type, mapNomor, mimetype) => {
   }
 };
 
+// --- KOMPONEN MAP (tmemospk_ketkomponen + master tketkomponen) ---
+// Dipakai pemilih komponen (mis. lookup SPK sublimasi) agar baris MAP
+// yang tak punya baris PO-item tetap punya daftar komponen.
+const getKomponenByMap = async (nomor) => {
+  const [rows] = await db.query(
+    `SELECT b.mkk_kode AS kode, a.nama AS nama, b.mkk_ket AS ket
+     FROM tmemospk_ketkomponen b
+     LEFT JOIN tketkomponen a ON a.kode = b.mkk_kode
+     WHERE b.mkk_spk = ? ORDER BY b.mkk_kode`,
+    [nomor],
+  );
+  return rows;
+};
+
 // --- GET DATA UNTUK CETAK ---
 const getPrintData = async (nomor) => {
   const query = `
@@ -1042,4 +1056,5 @@ module.exports = {
   getKatalogCustomer,
   syncNoPoApproval,
   getNoPoStatus,
+  getKomponenByMap,
 };

@@ -151,7 +151,7 @@ const getBastFormData = async (nomorMap, userCabang) => {
 
   if (checklist.length === 0) {
     [checklist] = await db.query(
-      `SELECT kode_sesuai AS no, nama_sesuai AS kesesuaian, "N" AS status, "-" AS keterangan,
+      `SELECT kode_sesuai AS no, nama_sesuai AS kesesuaian, "N" AS status, "" AS keterangan,
             "" AS user_create, NULL AS date_create, "" AS user_modify, NULL AS date_modify
        FROM tkesesuaian ORDER BY kode_sesuai`,
     );
@@ -386,6 +386,9 @@ const saveBastData = async (payload, userKode, userCabang) => {
     for (const item of checklist) {
       const kodeSesuai = Number(item.no || item.kode);
       if (![1, 2, 3, 4].includes(kodeSesuai)) continue;
+      // Aturan: keterangan diisi → status otomatis Y (ditegakkan di server).
+      const ket = String(item.keterangan ?? "").trim();
+      const status = ket ? "Y" : item.status || "N";
       const [existing] = await conn.query(
         `SELECT kode_sesuai FROM tkesesuaianmap WHERE mspk_nomor = ? AND kode_sesuai = ?`,
         [nomorMap, kodeSesuai],
@@ -395,14 +398,14 @@ const saveBastData = async (payload, userKode, userCabang) => {
         await conn.query(
           `INSERT INTO tkesesuaianmap (mspk_nomor, kode_sesuai, status, keterangan, user_create, date_create)
            VALUES (?, ?, ?, ?, ?, NOW())`,
-          [nomorMap, kodeSesuai, item.status, item.keterangan || "-", userKode],
+          [nomorMap, kodeSesuai, status, ket || "", userKode],
         );
       } else {
         await conn.query(
           `UPDATE tkesesuaianmap SET 
              status = ?, keterangan = ?, user_modify = ?, date_modify = NOW()
            WHERE mspk_nomor = ? AND kode_sesuai = ?`,
-          [item.status, item.keterangan || "-", userKode, nomorMap, kodeSesuai],
+          [status, ket || "", userKode, nomorMap, kodeSesuai],
         );
       }
     }

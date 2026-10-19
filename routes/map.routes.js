@@ -28,6 +28,10 @@ router.put("/design/status", verifyToken, controller.updateDesignStatus);
 // 4. SAVE & MUTASI DATA
 router.post("/", verifyToken, controller.saveMap);
 
+// Komponen MAP — WAJIB sebelum route dinamis :nomor di bawah.
+// Dipakai pemilih komponen (lookup SPK sublimasi) untuk MAP.
+router.get("/:nomor/komponen", verifyToken, controller.getKomponenByMap);
+
 // 5. ROUTE DINAMIS DENGAN PARAMETER :nomor (MUST BE AT THE BOTTOM)
 router.get("/:nomor", verifyToken, controller.getById);
 router.get("/:nomor/print", verifyToken, controller.getPrintData);
