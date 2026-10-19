@@ -2,6 +2,25 @@ const pool = require("../config/db.config");
 const db = pool;
 // const tutupBukuService = require("../tutupBukuService");
 
+// ============================================================
+// HELPER: Menyusun URL Gambar Desain (selaras salesOrder.service.js)
+// Prioritas: MAP > Nomor SO/SPK
+// ============================================================
+const resolveImageUrl = (cabang, mapNomor, soNomor) => {
+  const mediaBase = process.env.MEDIA_SERVER_URL || "https://manksi.com";
+  const cab = (cabang || "P05").trim();
+  const map = (mapNomor || "").trim();
+  const nomor = (soNomor || "").trim();
+
+  if (map) {
+    return `${mediaBase}/images/${cab}/map/${map}.jpg`;
+  }
+  if (nomor) {
+    return `${mediaBase}/images/${cab}/${nomor}.jpg`;
+  }
+  return null;
+};
+
 const getBrowseList = async (filters = {}) => {
   const {
     startDate = "",
@@ -225,7 +244,13 @@ const getBrowseList = async (filters = {}) => {
     ORDER BY x.Tanggal DESC, x.SO DESC, x.Nomor DESC`;
 
   const [rows] = await db.query(query, params);
-  return rows;
+  // Lengkapi URL gambar desain (prioritas MAP, fallback no. SO/SPK) supaya
+  // modal "Referensi Sales Order — Konfirmasi Pembuatan SPK" bisa menampilkan
+  // preview gambar desain.
+  return rows.map((r) => ({
+    ...r,
+    GambarUrl: resolveImageUrl(r.Cab, r.MAP, r.Nomor || r.SO),
+  }));
 };
 
 const getSizes = async (nomor) => {
@@ -799,8 +824,9 @@ const isPremiumWorkshop = (cab) => String(cab).toUpperCase() === "P04";
 // milik SPK sendiri (bisa beda dari alokasi SO sumbernya). ---
 const getAlokasi = async (spkNomor) => {
   const [rows] = await db.query(
-    `SELECT spka_urut AS urut, spka_alamat AS alamat, spka_kota AS kota,
-            spka_person AS person, spka_hp AS hp, spka_jumlah AS jumlah
+    `SELECT spka_urut AS urut, spka_alamat AS alamat, spka_toko AS toko,
+            spka_kota AS kota, spka_person AS person, spka_hp AS hp,
+            spka_jumlah AS jumlah
      FROM tspk_alokasi WHERE spka_spk_nomor = ? ORDER BY spka_urut`,
     [spkNomor],
   );
@@ -818,6 +844,7 @@ const saveAlokasi = async (conn, spkNomor, list) => {
     spkNomor,
     i + 1,
     item.alamat || "",
+    item.toko || "",
     item.kota || "",
     item.person || "",
     item.hp || "",
@@ -825,7 +852,7 @@ const saveAlokasi = async (conn, spkNomor, list) => {
   ]);
   await conn.query(
     `INSERT INTO tspk_alokasi
-       (spka_spk_nomor, spka_urut, spka_alamat, spka_kota, spka_person, spka_hp, spka_jumlah)
+       (spka_spk_nomor, spka_urut, spka_alamat, spka_toko, spka_kota, spka_person, spka_hp, spka_jumlah)
      VALUES ?`,
     [vals],
   );
@@ -836,8 +863,9 @@ const saveAlokasi = async (conn, spkNomor, list) => {
 // karena SO bisa hidup di tsalesorder (baru) atau tspk legacy. ---
 const getSoAlokasiReference = async (soNomor) => {
   const [newRows] = await db.query(
-    `SELECT soa_urut AS urut, soa_alamat AS alamat, soa_kota AS kota,
-            soa_person AS person, soa_hp AS hp, soa_jumlah AS jumlah
+    `SELECT soa_urut AS urut, soa_alamat AS alamat, soa_toko AS toko,
+            soa_kota AS kota, soa_person AS person, soa_hp AS hp,
+            soa_jumlah AS jumlah
      FROM tsalesorder_alokasi WHERE soa_so_nomor = ? ORDER BY soa_urut`,
     [soNomor],
   );

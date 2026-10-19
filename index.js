@@ -87,6 +87,13 @@ const lhkHapusPlangkanSpandukRoutes = require("./routes/spanduk/lhkHapusPlangkan
 const lhkDesignProofSpandukRoutes = require("./routes/spanduk/lhkDesignProofSpanduk.routes");
 const rekapLhkSpandukRoutes = require("./routes/spanduk/rekapLhkSpanduk.routes");
 const lhkPlotterSpandukRoutes = require("./routes/spanduk/lhkPlotterSpanduk.routes");
+const monCetakSpandukRoutes = require("./routes/spanduk/monCetakSpanduk.routes");
+const monAfdrukSpandukRoutes = require("./routes/spanduk/monAfdrukSpanduk.routes");
+const monJahitSpandukRoutes = require("./routes/spanduk/monJahitSpanduk.routes");
+const monLipatSpandukRoutes = require("./routes/spanduk/monLipatSpanduk.routes");
+const monCuiringSpandukRoutes = require("./routes/spanduk/monCuiringSpanduk.routes");
+const monPlotterSpandukRoutes = require("./routes/spanduk/monPlotterSpanduk.routes");
+const monHapusPlangkanSpandukRoutes = require("./routes/spanduk/monHapusPlangkanSpanduk.routes");
 const penerimaanBahanPenolongRoutes = require("./routes/spanduk/penerimaanBahanPenolong.routes");
 const lapKartuStokMmtRoutes = require("./routes/lapKartuStokMmt.routes");
 const lapMonJadwalKirimRoutes = require("./routes/lapMonJadwalKirim.routes");
@@ -271,6 +278,17 @@ app.use("/api/spanduk/lhk-hapus-plangkan", clientCertAuth, lhkHapusPlangkanSpand
 app.use("/api/spanduk/lhk-design-proof", clientCertAuth, lhkDesignProofSpandukRoutes);
 app.use("/api/spanduk/rekap-lhk", clientCertAuth, rekapLhkSpandukRoutes);
 app.use("/api/spanduk/lhk-plotter", clientCertAuth, lhkPlotterSpandukRoutes);
+app.use("/api/spanduk/mon-cetak", clientCertAuth, monCetakSpandukRoutes);
+app.use("/api/spanduk/mon-afdruk", clientCertAuth, monAfdrukSpandukRoutes);
+app.use("/api/spanduk/mon-jahit", clientCertAuth, monJahitSpandukRoutes);
+app.use("/api/spanduk/mon-lipat", clientCertAuth, monLipatSpandukRoutes);
+app.use("/api/spanduk/mon-cuiring", clientCertAuth, monCuiringSpandukRoutes);
+app.use("/api/spanduk/mon-plotter", clientCertAuth, monPlotterSpandukRoutes);
+app.use(
+  "/api/spanduk/mon-hapus-plangkan",
+  clientCertAuth,
+  monHapusPlangkanSpandukRoutes,
+);
 app.use(
   "/api/spanduk/penerimaan-bahan",
   clientCertAuth,

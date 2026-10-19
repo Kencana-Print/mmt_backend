@@ -131,7 +131,7 @@ const getLookup = async (startDate, endDate, shift = "", search = "") => {
             IFNULL(t1.lstatus, 'DRAFT') AS Status,
             
             /* --- STATUS CLOSE (OPEN / CLOSED) --- */
-            IF(rekap.lcd_lch_nomor IS NOT NULL, 'CLOSED', 'OPEN') AS StatusClose
+            IF(rekap.lcd_lnomor IS NOT NULL, 'CLOSED', 'OPEN') AS StatusClose
             
         FROM tlhk_mesin_hdr t1
         LEFT JOIN tspk t2 ON t2.spk_nomor = t1.lspk_nomor
@@ -153,9 +153,12 @@ const getLookup = async (startDate, endDate, shift = "", search = "") => {
         ) all_prod ON all_prod.lspk_nomor = t1.lspk_nomor
         
         LEFT JOIN (
-            SELECT DISTINCT lcd_lch_nomor 
+            -- LHK Mesin dianggap CLOSED bila sudah pernah diambil ke Approve Cetak.
+            -- Referensi LHK Mesin disimpan di kolom lcd_lnomor (bukan lcd_lch_nomor,
+            -- yang merupakan nomor header LHK Cetak MMT).
+            SELECT DISTINCT lcd_lnomor 
             FROM tlhk_cetakmmt_dtl
-        ) rekap ON rekap.lcd_lch_nomor = t1.lnomor
+        ) rekap ON rekap.lcd_lnomor = t1.lnomor
 
         WHERE t1.ltanggal BETWEEN ? AND ?
     `;
@@ -230,6 +233,8 @@ const getLookupByNomor = async (nomor) => {
                 IFNULL(d.ld_sisalebar, 0) AS Sisa_Lebar,
 
                 IFNULL(akumulasi.total_cetak_sebelumnya, 0) AS sudahcetak,
+                -- Sisa order SEBELUM LHK ini diinput (order - total cetak LHK sebelumnya)
+                CAST(GREATEST(0, IFNULL(s.spk_jumlah, 0) - IFNULL(akumulasi.total_cetak_sebelumnya, 0)) AS UNSIGNED) AS kurangcetak_asli,
                 IFNULL(d.ld_total_qtycetak, 0) AS totalcetak,
                 ROUND(IFNULL(s.spk_panjang, 0) * IFNULL(s.spk_lebar, 0) * IFNULL(d.ld_total_qtycetak, 0), 2) AS m2_cetak,
                 IFNULL(s.spk_panjang, 0) AS spk_panjang,
@@ -258,7 +263,7 @@ IFNULL(d.ld_padding_samping, 1) AS padding_samping,
             LEFT JOIN (
                 SELECT ld_spk_nomor, SUM(ld_total_qtycetak) AS total_cetak_sebelumnya 
                 FROM tlhk_mesin_dtl 
-                WHERE ld_lnomor != ? 
+                WHERE ld_lnomor < ? 
                 GROUP BY ld_spk_nomor
             ) akumulasi ON akumulasi.ld_spk_nomor = d.ld_spk_nomor
             WHERE d.ld_lnomor = ?

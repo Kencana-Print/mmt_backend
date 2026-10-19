@@ -1,0 +1,25 @@
+const monCetakSpandukService = require('../../services/spanduk/monCetakSpanduk.service');
+
+// GET /api/spanduk/mon-cetak/browse?startDate=&endDate=&perusahaan=
+exports.getBrowseList = async (req, res) => {
+    try {
+        const { startDate, endDate, perusahaan } = req.query;
+
+        const data = await monCetakSpandukService.getBrowseList(
+            startDate,
+            endDate,
+            perusahaan
+        );
+
+        return res.status(200).json({
+            success: true,
+            count: data.length,
+            data
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message
+        });
+    }
+};
