@@ -21,6 +21,7 @@ const NODE_TYPES = [
   "LHK_CETAK",
   "LHK_TEKSTIL",
   "LHK_PROOF",
+  "LHK_PAPERPRINT",
   "LHK_SUBLIM",
   "LHK_FINISHING",
   "STBJ",
@@ -135,11 +136,26 @@ const searchLhkProof = async (kw, n) => {
   }));
 };
 
-const searchLhkSublim = async (kw, n) => {
+const searchLhkPaperprint = async (kw, n) => {
   const [rows] = await pool.query(
-    `SELECT h.lsb_nomor AS nomor, h.lsb_tanggal AS tanggal
+    `SELECT h.lsb_nomor AS nomor, h.lsb_barcode AS label, h.lsb_tanggal AS tanggal
      FROM tlhk_sublim_hdr h WHERE h.lsb_nomor LIKE ?
      ORDER BY h.lsb_tanggal DESC LIMIT ${lim(n)}`,
+    [kw],
+  );
+  return rows.map((r) => ({
+    type: "LHK_PAPERPRINT",
+    nomor: r.nomor,
+    label: r.label ? `Bahan: ${r.label}` : "",
+    tanggal: fmtDate(r.tanggal),
+  }));
+};
+
+const searchLhkSublim = async (kw, n) => {
+  const [rows] = await pool.query(
+    `SELECT h.lr_nomor AS nomor, h.lr_tanggal AS tanggal
+     FROM tlhk_rtr_hdr h WHERE h.lr_nomor LIKE ?
+     ORDER BY h.lr_tanggal DESC LIMIT ${lim(n)}`,
     [kw],
   );
   return rows.map((r) => ({
@@ -218,6 +234,7 @@ const SEARCHERS = {
   LHK_CETAK: searchLhkCetak,
   LHK_TEKSTIL: searchLhkTekstil,
   LHK_PROOF: searchLhkProof,
+  LHK_PAPERPRINT: searchLhkPaperprint,
   LHK_SUBLIM: searchLhkSublim,
   LHK_FINISHING: searchLhkFinishing,
   STBJ: searchStbj,
@@ -441,7 +458,7 @@ const nodeHeader = async (conn, type, nomor) => {
         kategori: bahan === "-" ? "" : bahan,
       };
     }
-    case "LHK_SUBLIM": {
+    case "LHK_PAPERPRINT": {
       const [h] = await conn.query(
         `SELECT lsb_nomor, lsb_tanggal
          FROM tlhk_sublim_hdr WHERE TRIM(lsb_nomor) = TRIM(?) LIMIT 1`,
@@ -455,10 +472,32 @@ const nodeHeader = async (conn, type, nomor) => {
       );
       const bahan = ((d[0] && d[0].bahan) || "-");
       return {
-        type: "LHK_SUBLIM",
+        type: "LHK_PAPERPRINT",
         nomor: h[0].lsb_nomor,
         label: `Bahan: ${bahan}`,
         tanggal: fmtDate(h[0].lsb_tanggal),
+        jumlah: toNum(d[0] && d[0].qty),
+        kategori: bahan === "-" ? "" : bahan,
+      };
+    }
+    case "LHK_SUBLIM": {
+      const [h] = await conn.query(
+        `SELECT lr_nomor, lr_tanggal
+         FROM tlhk_rtr_hdr WHERE TRIM(lr_nomor) = TRIM(?) LIMIT 1`,
+        [nomor],
+      );
+      if (!h.length) return null;
+      const [d] = await conn.query(
+        `SELECT SUM(lrd_jumlah) AS qty, MAX(lrd_bahan) AS bahan
+         FROM tlhk_rtr_dtl WHERE TRIM(lrd_lr_nomor) = TRIM(?)`,
+        [nomor],
+      );
+      const bahan = ((d[0] && d[0].bahan) || "-");
+      return {
+        type: "LHK_SUBLIM",
+        nomor: h[0].lr_nomor,
+        label: `Bahan: ${bahan}`,
+        tanggal: fmtDate(h[0].lr_tanggal),
         jumlah: toNum(d[0] && d[0].qty),
         kategori: bahan === "-" ? "" : bahan,
       };
@@ -561,8 +600,8 @@ const forwardDownstream = async (conn, targetNomors) => {
     }),
   );
 
-  // 6. LHK SUBLIM
-  const [sublim] = await conn.query(
+  // 6. LHK PAPERPRINT (tabel tlhk_sublim_*)
+  const [paperprint] = await conn.query(
     `SELECT h.lsb_nomor, h.lsb_tanggal, SUM(d.lsbd_jumlah) AS qty, MAX(d.lsbd_bahan) AS bahan
      FROM tlhk_sublim_dtl d
      INNER JOIN tlhk_sublim_hdr h ON h.lsb_nomor = d.lsbd_lsb_nomor
@@ -570,12 +609,32 @@ const forwardDownstream = async (conn, targetNomors) => {
      GROUP BY h.lsb_nomor ORDER BY h.lsb_tanggal`,
     targetNomors,
   );
-  sublim.forEach((x) =>
+  paperprint.forEach((x) =>
     forward.push({
-      type: "LHK_SUBLIM",
+      type: "LHK_PAPERPRINT",
       nomor: x.lsb_nomor,
       label: `Bahan: ${x.bahan || "-"}`,
       tanggal: fmtDate(x.lsb_tanggal),
+      jumlah: toNum(x.qty),
+      kategori: x.bahan || "",
+    }),
+  );
+
+  // 7. LHK SUBLIM / ROLL TO ROLL (tabel tlhk_rtr_*)
+  const [sublim] = await conn.query(
+    `SELECT h.lr_nomor, h.lr_tanggal, SUM(d.lrd_jumlah) AS qty, MAX(d.lrd_bahan) AS bahan
+     FROM tlhk_rtr_dtl d
+     INNER JOIN tlhk_rtr_hdr h ON h.lr_nomor = d.lrd_lr_nomor
+     WHERE TRIM(d.lrd_spk_nomor) IN (${placeholders})
+     GROUP BY h.lr_nomor ORDER BY h.lr_tanggal`,
+    targetNomors,
+  );
+  sublim.forEach((x) =>
+    forward.push({
+      type: "LHK_SUBLIM",
+      nomor: x.lr_nomor,
+      label: `Bahan: ${x.bahan || "-"}`,
+      tanggal: fmtDate(x.lr_tanggal),
       jumlah: toNum(x.qty),
       kategori: x.bahan || "",
     }),
@@ -939,10 +998,15 @@ const expandOther = async (conn, type, nomor) => {
       col: "lprd_spk_nomor",
       key: "lprd_lpr_nomor",
     },
-    LHK_SUBLIM: {
+    LHK_PAPERPRINT: {
       table: "tlhk_sublim_dtl",
       col: "lsbd_spk_nomor",
       key: "lsbd_lsb_nomor",
+    },
+    LHK_SUBLIM: {
+      table: "tlhk_rtr_dtl",
+      col: "lrd_spk_nomor",
+      key: "lrd_lr_nomor",
     },
     LHK_FINISHING: {
       table: "tlhk_finishingmmt_dtl",
