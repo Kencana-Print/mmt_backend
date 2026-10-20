@@ -131,45 +131,36 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         ) sz_lhk ON sz_lhk.lsbd_spk_nomor = spks_nomor AND sz_lhk.lsbd_poid_size = spks_size
       `;
     }
-    // 4. KATEGORI SUBLIM (cbJenisIndex = '3')
-    // Sumber produksi sama dengan legacy (ufrmlap_lmkp_mmt.pas, cbjenis=2):
-    // tlhk_sublim_dtl. Sebelumnya memakai tlhk_rtr_dtl (LHK Retur) sehingga
-    // SPK yang sudah produksi sublim tetapi belum retur tampak K-Cetak penuh.
+    // 4. KATEGORI SUBLIM (cbJenisIndex = '3') — memakai LHK Roll to Roll (RTR)
     else if (cbJenisIndex === "3") {
-      fieldJmlCetak = "ifnull(sb.jml_cetak_sublim, 0)";
+      fieldJmlCetak = "ifnull(rtr.jml_cetak_sublim, 0)";
       conditionExtra = "AND spk_sublim = 'Y'";
       selectMesinFields = `
         0 AS mt01, 0 AS mt02, 0 AS mt03, 0 AS mt04, 0 AS mt05, 0 AS mi,
         0 AS mx01, 0 AS mx02, 0 AS mx03, 0 AS mx04, 0 AS mx05,
-        ROUND(IFNULL(sb.SB01, 0), 0) AS sb01, ROUND(IFNULL(sb.SB02, 0), 0) AS sb02,
-        ROUND(IFNULL(sb.SB03, 0), 0) AS sb03, ROUND(IFNULL(sb.SB04, 0), 0) AS sb04,
-        ROUND(IFNULL(sb.SB05, 0), 0) AS sb05,
-        0 AS rtr
+        0 AS sb01, 0 AS sb02, 0 AS sb03, 0 AS sb04, 0 AS sb05,
+        ROUND(IFNULL(rtr.RTR, 0), 0) AS rtr
       `;
       joinLhkCetak = `
         LEFT JOIN (
-            SELECT lsbd_spk_nomor, 
-                SUM(IF(lsbd_lokasi='SB01',lsbd_jumlah,0)) SB01,
-                SUM(IF(lsbd_lokasi='SB02',lsbd_jumlah,0)) SB02,
-                SUM(IF(lsbd_lokasi='SB03',lsbd_jumlah,0)) SB03,
-                SUM(IF(lsbd_lokasi='SB04',lsbd_jumlah,0)) SB04,
-                SUM(IF(lsbd_lokasi='SB05',lsbd_jumlah,0)) SB05,
-                SUM(IFNULL(lsbd_jumlah,0)) jml_cetak_sublim
-            FROM tlhk_sublim_dtl
+            SELECT lrd_spk_nomor, 
+                SUM(IF(lrd_lokasi='RTR',lrd_jumlah,0)) RTR,
+                SUM(IFNULL(lrd_jumlah,0)) jml_cetak_sublim
+            FROM tlhk_rtr_dtl
             GROUP BY 1
-        ) sb ON sb.lsbd_spk_nomor = spk_nomor`;
+        ) rtr ON rtr.lrd_spk_nomor = spk_nomor`;
 
       joinSizeLhk = `
         LEFT JOIN (
             SELECT 
-                lsbd_spk_nomor, 
-                lsbd_poid_size, 
-                lsbd_komponen,
-                SUM(IFNULL(lsbd_jumlah, 0)) AS qty_cetak_komponen
-            FROM tlhk_sublim_dtl
-            WHERE lsbd_poid_size != '-' AND lsbd_poid_size != ''
-            GROUP BY lsbd_spk_nomor, lsbd_poid_size, lsbd_komponen
-        ) sz_lhk ON sz_lhk.lsbd_spk_nomor = spks_nomor AND sz_lhk.lsbd_poid_size = spks_size
+                lrd_spk_nomor, 
+                lrd_poid_size, 
+                lrd_komponen,
+                SUM(IFNULL(lrd_jumlah, 0)) AS qty_cetak_komponen
+            FROM tlhk_rtr_dtl
+            WHERE lrd_poid_size != '-' AND lrd_poid_size != ''
+            GROUP BY lrd_spk_nomor, lrd_poid_size, lrd_komponen
+        ) sz_lhk ON sz_lhk.lrd_spk_nomor = spks_nomor AND sz_lhk.lrd_poid_size = spks_size
       `;
     }
     // Query Utama Monitoring LMKP
@@ -235,10 +226,12 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
     const authoritativeSizeSpk = new Set();
 
     if (["2", "3"].includes(cbJenisIndex)) {
-      // Paperprint & Sublim sama-sama memakai LHK Sublim (legacy LMKP
-      // kategori SUBLIM juga membaca tlhk_sublim_dtl).
-      const tableDtl = "tlhk_sublim_dtl";
-      const prefix = "lsbd";
+      // Paperprint membaca LHK Sublim; Sublim membaca LHK Roll to Roll (RTR).
+      const tableDtl =
+        cbJenisIndex === "2" ? "tlhk_sublim_dtl" : "tlhk_rtr_dtl";
+      const prefix = cbJenisIndex === "2" ? "lsbd" : "lrd";
+      const orderCol =
+        cbJenisIndex === "2" ? "lsbd_jumlah_order" : "lrd_order";
 
       // Pastikan rows ada isinya sebelum mengambil nomor SPK
       if (rows && rows.length > 0) {
@@ -282,10 +275,10 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
       `;
         const [lhkRows] = await pool.query(lhkDetailSql);
 
-        // Qty order per size. Sumber paling akurat: LHK Retur (lrd_order,
-        // per size). LHK Sublim menyimpan lsbd_jumlah_order sebagai TOTAL
-        // order (nilainya sama untuk semua size), jadi hanya dipakai bila
-        // memang berbeda per size.
+        // Qty order per size. Sumber paling akurat: LHK Roll to Roll
+        // (lrd_order, per size). LHK Sublim menyimpan lsbd_jumlah_order
+        // sebagai TOTAL order (nilainya sama untuk semua size), jadi hanya
+        // dipakai bila memang berbeda per size.
         const rtrOrderSql = `
         SELECT lrd_spk_nomor AS spk_nomor,
                lrd_poid_size AS poid_size,
@@ -308,7 +301,7 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         const lhkOrderSql = `
         SELECT ${prefix}_spk_nomor AS spk_nomor,
                ${prefix}_poid_size AS poid_size,
-               MAX(IFNULL(${prefix}_jumlah_order, 0)) AS qty_order
+               MAX(IFNULL(${orderCol}, 0)) AS qty_order
         FROM ${tableDtl}
         WHERE ${prefix}_spk_nomor IN (${spkNomors})
         GROUP BY ${prefix}_spk_nomor, ${prefix}_poid_size
@@ -408,7 +401,7 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
 
           // Fallback terakhir: SPK lama yang tspk_size & spk_ukuran-nya
           // kosong. Urutan sumber qty order per size:
-          // 1) LHK Retur (lrd_order) — per size.
+          // 1) LHK Roll to Roll (lrd_order) — per size.
           // 2) LHK Sublim (lsbd_jumlah_order) — hanya bila bukan total
           //    order yang diulang untuk semua size.
           // 3) Qty produksi LHK per size (agar rincian tetap tampil).
