@@ -140,6 +140,7 @@ const getDetailsByNomor = async (nomor) => {
   const sqlDetail = `
         SELECT 
             d.lsbd_lsb_nomor AS Nomor,
+            d.lsbd_no_urut AS No_Urut,
             d.lsbd_poi_nomor AS Poi_Nomor,
             d.lsbd_poid_size AS Poi_Size,
             d.lsbd_lokasi AS Lokasi, 

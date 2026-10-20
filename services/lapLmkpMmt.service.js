@@ -5,6 +5,27 @@ const throwDbError = (message, error) => {
   throw new Error(message + ": " + error.message);
 };
 
+// Parse rincian ukuran dari tspk.spk_ukuran, mis. "L=15, XL=20, 2XL=10".
+// String dimensi (mis. "3X1 M") atau nama size tanpa qty tidak diambil.
+const parseUkuranText = (text) => {
+  const result = [];
+  String(text || "")
+    .split(/[,;\n]+/)
+    .forEach((part) => {
+      const s = part.trim();
+      if (!s) return;
+      const m = s.match(
+        /^([A-Za-z0-9][A-Za-z0-9/.\- ]*?)\s*(?:=|:)\s*(\d+)\s*(?:pcs|pc)?\s*$/i,
+      );
+      if (!m) return;
+      const size = m[1].trim().toUpperCase();
+      const qty = Number(m[2]);
+      if (!size || !Number.isFinite(qty) || qty <= 0) return;
+      result.push({ size, qty });
+    });
+  return result;
+};
+
 exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
   try {
     let conditionExtra = "";
@@ -110,36 +131,45 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         ) sz_lhk ON sz_lhk.lsbd_spk_nomor = spks_nomor AND sz_lhk.lsbd_poid_size = spks_size
       `;
     }
-    // 4. KATEGORI SUBLIM / RTR (cbJenisIndex = '3')
+    // 4. KATEGORI SUBLIM (cbJenisIndex = '3')
+    // Sumber produksi sama dengan legacy (ufrmlap_lmkp_mmt.pas, cbjenis=2):
+    // tlhk_sublim_dtl. Sebelumnya memakai tlhk_rtr_dtl (LHK Retur) sehingga
+    // SPK yang sudah produksi sublim tetapi belum retur tampak K-Cetak penuh.
     else if (cbJenisIndex === "3") {
-      fieldJmlCetak = "ifnull(rtr.jml_cetak_sublim, 0)";
+      fieldJmlCetak = "ifnull(sb.jml_cetak_sublim, 0)";
       conditionExtra = "AND spk_sublim = 'Y'";
       selectMesinFields = `
         0 AS mt01, 0 AS mt02, 0 AS mt03, 0 AS mt04, 0 AS mt05, 0 AS mi,
         0 AS mx01, 0 AS mx02, 0 AS mx03, 0 AS mx04, 0 AS mx05,
-        0 AS sb01, 0 AS sb02, 0 AS sb03, 0 AS sb04, 0 AS sb05,
-        ROUND(IFNULL(rtr.RTR, 0), 0) AS rtr
+        ROUND(IFNULL(sb.SB01, 0), 0) AS sb01, ROUND(IFNULL(sb.SB02, 0), 0) AS sb02,
+        ROUND(IFNULL(sb.SB03, 0), 0) AS sb03, ROUND(IFNULL(sb.SB04, 0), 0) AS sb04,
+        ROUND(IFNULL(sb.SB05, 0), 0) AS sb05,
+        0 AS rtr
       `;
       joinLhkCetak = `
         LEFT JOIN (
-            SELECT lrd_spk_nomor, 
-                SUM(IF(lrd_lokasi='RTR',lrd_jumlah,0)) RTR,
-                SUM(IFNULL(lrd_jumlah,0)) jml_cetak_sublim
-            FROM tlhk_rtr_dtl
+            SELECT lsbd_spk_nomor, 
+                SUM(IF(lsbd_lokasi='SB01',lsbd_jumlah,0)) SB01,
+                SUM(IF(lsbd_lokasi='SB02',lsbd_jumlah,0)) SB02,
+                SUM(IF(lsbd_lokasi='SB03',lsbd_jumlah,0)) SB03,
+                SUM(IF(lsbd_lokasi='SB04',lsbd_jumlah,0)) SB04,
+                SUM(IF(lsbd_lokasi='SB05',lsbd_jumlah,0)) SB05,
+                SUM(IFNULL(lsbd_jumlah,0)) jml_cetak_sublim
+            FROM tlhk_sublim_dtl
             GROUP BY 1
-        ) rtr ON rtr.lrd_spk_nomor = spk_nomor`;
+        ) sb ON sb.lsbd_spk_nomor = spk_nomor`;
 
       joinSizeLhk = `
         LEFT JOIN (
             SELECT 
-                lrd_spk_nomor, 
-                lrd_poid_size, 
-                lrd_komponen,
-                SUM(IFNULL(lrd_jumlah, 0)) AS qty_cetak_komponen
-            FROM tlhk_rtr_dtl
-            WHERE lrd_poid_size != '-' AND lrd_poid_size != ''
-            GROUP BY lrd_spk_nomor, lrd_poid_size, lrd_komponen
-        ) sz_lhk ON sz_lhk.lrd_spk_nomor = spks_nomor AND sz_lhk.lrd_poid_size = spks_size
+                lsbd_spk_nomor, 
+                lsbd_poid_size, 
+                lsbd_komponen,
+                SUM(IFNULL(lsbd_jumlah, 0)) AS qty_cetak_komponen
+            FROM tlhk_sublim_dtl
+            WHERE lsbd_poid_size != '-' AND lsbd_poid_size != ''
+            GROUP BY lsbd_spk_nomor, lsbd_poid_size, lsbd_komponen
+        ) sz_lhk ON sz_lhk.lsbd_spk_nomor = spks_nomor AND sz_lhk.lsbd_poid_size = spks_size
       `;
     }
     // Query Utama Monitoring LMKP
@@ -202,11 +232,13 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
     let spkKomponenMap = {};
     let lhkSizeMap = {};
     let lhkAllSetMap = {};
+    const authoritativeSizeSpk = new Set();
 
     if (["2", "3"].includes(cbJenisIndex)) {
-      const tableDtl =
-        cbJenisIndex === "2" ? "tlhk_sublim_dtl" : "tlhk_rtr_dtl";
-      const prefix = cbJenisIndex === "2" ? "lsbd" : "lrd";
+      // Paperprint & Sublim sama-sama memakai LHK Sublim (legacy LMKP
+      // kategori SUBLIM juga membaca tlhk_sublim_dtl).
+      const tableDtl = "tlhk_sublim_dtl";
+      const prefix = "lsbd";
 
       // Pastikan rows ada isinya sebelum mengambil nomor SPK
       if (rows && rows.length > 0) {
@@ -219,11 +251,11 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         INNER JOIN tbahan k ON k.bhn_kode = p.sk_kode
         WHERE p.sk_nomor IN (${spkNomors})
         UNION
-        SELECT DISTINCT ${prefix}_spk_nomor AS spk_nomor, ${prefix}_komponen AS komponen_nama
+        SELECT DISTINCT ${prefix}_spk_nomor AS spk_nomor,
+          COALESCE(NULLIF(TRIM(${prefix}_komponen), ''), 'ALL SET') AS komponen_nama
         FROM ${tableDtl}
         WHERE ${prefix}_spk_nomor IN (${spkNomors}) 
-          AND ${prefix}_komponen != 'ALL SET' 
-          AND ${prefix}_komponen IS NOT NULL
+          AND COALESCE(NULLIF(TRIM(${prefix}_komponen), ''), 'ALL SET') != 'ALL SET'
       `;
         const [kompRows] = await pool.query(kompSql);
 
@@ -241,18 +273,70 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         SELECT 
           ${prefix}_spk_nomor AS spk_nomor,
           ${prefix}_poid_size AS poid_size,
-          ${prefix}_komponen AS komponen_nama,
+          COALESCE(NULLIF(TRIM(${prefix}_komponen), ''), 'ALL SET') AS komponen_nama,
           SUM(IFNULL(${prefix}_jumlah, 0)) AS qty_cetak
         FROM ${tableDtl}
         WHERE ${prefix}_spk_nomor IN (${spkNomors})
-        GROUP BY ${prefix}_spk_nomor, ${prefix}_poid_size, ${prefix}_komponen
+        GROUP BY ${prefix}_spk_nomor, ${prefix}_poid_size,
+          COALESCE(NULLIF(TRIM(${prefix}_komponen), ''), 'ALL SET')
       `;
         const [lhkRows] = await pool.query(lhkDetailSql);
 
+        // Qty order per size. Sumber paling akurat: LHK Retur (lrd_order,
+        // per size). LHK Sublim menyimpan lsbd_jumlah_order sebagai TOTAL
+        // order (nilainya sama untuk semua size), jadi hanya dipakai bila
+        // memang berbeda per size.
+        const rtrOrderSql = `
+        SELECT lrd_spk_nomor AS spk_nomor,
+               lrd_poid_size AS poid_size,
+               MAX(IFNULL(lrd_order, 0)) AS qty_order
+        FROM tlhk_rtr_dtl
+        WHERE lrd_spk_nomor IN (${spkNomors})
+        GROUP BY lrd_spk_nomor, lrd_poid_size
+      `;
+        const [rtrOrderRows] = await pool.query(rtrOrderSql);
+        const rtrOrderMap = {};
+        rtrOrderRows.forEach((o) => {
+          const poidSize = String(o.poid_size ?? "").trim();
+          if (!poidSize || poidSize === "-") return;
+          if (!rtrOrderMap[o.spk_nomor]) rtrOrderMap[o.spk_nomor] = {};
+          rtrOrderMap[o.spk_nomor][poidSize.toUpperCase()] = Number(
+            o.qty_order || 0,
+          );
+        });
+
+        const lhkOrderSql = `
+        SELECT ${prefix}_spk_nomor AS spk_nomor,
+               ${prefix}_poid_size AS poid_size,
+               MAX(IFNULL(${prefix}_jumlah_order, 0)) AS qty_order
+        FROM ${tableDtl}
+        WHERE ${prefix}_spk_nomor IN (${spkNomors})
+        GROUP BY ${prefix}_spk_nomor, ${prefix}_poid_size
+      `;
+        const [lhkOrderRows] = await pool.query(lhkOrderSql);
+        const lhkOrderMap = {};
+        lhkOrderRows.forEach((o) => {
+          const poidSize = String(o.poid_size ?? "").trim();
+          if (!poidSize || poidSize === "-") return;
+          if (!lhkOrderMap[o.spk_nomor]) lhkOrderMap[o.spk_nomor] = {};
+          lhkOrderMap[o.spk_nomor][poidSize.toUpperCase()] = Number(
+            o.qty_order || 0,
+          );
+        });
+
         lhkRows.forEach((l) => {
           if (!lhkSizeMap[l.spk_nomor]) lhkSizeMap[l.spk_nomor] = {};
-          if (l.poid_size === "-" || !l.poid_size) {
-            if (l.komponen_nama === "ALL SET") {
+
+          // LHK lama tidak menyimpan komponen (NULL/'').
+          // Anggap "ALL SET" agar qty produksi tetap dihitung untuk semua
+          // komponen, bukan dianggap 0 (yang membuat K-Cetak tampak penuh).
+          const komponenNama =
+            String(l.komponen_nama ?? "").trim() || "ALL SET";
+          const poidSize = String(l.poid_size ?? "").trim();
+          const isNoSize = poidSize === "" || poidSize === "-";
+
+          if (isNoSize) {
+            if (komponenNama === "ALL SET") {
               if (!lhkAllSetMap[l.spk_nomor])
                 lhkAllSetMap[l.spk_nomor] = { ALL_SET_GLOBAL: 0 };
               lhkAllSetMap[l.spk_nomor]["ALL_SET_GLOBAL"] += Number(
@@ -260,15 +344,16 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
               );
             } else {
               if (!lhkAllSetMap[l.spk_nomor]) lhkAllSetMap[l.spk_nomor] = {};
-              lhkAllSetMap[l.spk_nomor][l.komponen_nama] =
-                (lhkAllSetMap[l.spk_nomor][l.komponen_nama] || 0) +
+              lhkAllSetMap[l.spk_nomor][komponenNama] =
+                (lhkAllSetMap[l.spk_nomor][komponenNama] || 0) +
                 Number(l.qty_cetak);
             }
           } else {
-            if (!lhkSizeMap[l.spk_nomor][l.poid_size])
-              lhkSizeMap[l.spk_nomor][l.poid_size] = {};
-            lhkSizeMap[l.spk_nomor][l.poid_size][l.komponen_nama] =
-              (lhkSizeMap[l.spk_nomor][l.poid_size][l.komponen_nama] || 0) +
+            const sizeKey = poidSize.toUpperCase();
+            if (!lhkSizeMap[l.spk_nomor][sizeKey])
+              lhkSizeMap[l.spk_nomor][sizeKey] = {};
+            lhkSizeMap[l.spk_nomor][sizeKey][komponenNama] =
+              (lhkSizeMap[l.spk_nomor][sizeKey][komponenNama] || 0) +
               Number(l.qty_cetak);
           }
         });
@@ -281,6 +366,116 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
       `;
         const [sizeRows] = await pool.query(sizeSql);
         sizes = sizeRows;
+        sizeRows.forEach((s) => authoritativeSizeSpk.add(s.spks_nomor));
+
+        // Fallback detail ukuran: sebagian SPK lama tidak punya baris
+        // tspk_size, tetapi rincian ukurannya masih tersimpan di
+        // tspk.spk_ukuran (contoh: "L=15, XL=20, 2XL=10, 3XL=5").
+        const sizeSpkSet = new Set(sizeRows.map((s) => s.spks_nomor));
+        const missingSizeSpk = rows
+          .map((r) => r.NOMOR)
+          .filter((n) => n && !sizeSpkSet.has(n));
+
+        if (missingSizeSpk.length > 0) {
+          const inList = missingSizeSpk.map((n) => `'${n}'`).join(",");
+          const [ukuranRows] = await pool.query(
+            `SELECT spk_nomor, spk_ukuran, spk_jumlah
+             FROM tspk WHERE spk_nomor IN (${inList})`,
+          );
+          const sizeFilled = new Set();
+
+          ukuranRows.forEach((u) => {
+            const parsed = parseUkuranText(u.spk_ukuran);
+            if (parsed.length === 0) return;
+
+            parsed.forEach((p) => {
+              sizes.push({
+                spks_nomor: u.spk_nomor,
+                spks_size: p.size,
+                spks_qty: p.qty,
+              });
+            });
+            sizeFilled.add(u.spk_nomor);
+
+            // Anggap otoritatif bila total qty ukuran = jumlah order, agar
+            // krg_Cetak total tetap akurat. Bila tidak, detail tetap tampil
+            // tetapi total memakai hasil SQL.
+            const totalSize = parsed.reduce((sum, p) => sum + p.qty, 0);
+            if (totalSize === Number(u.spk_jumlah || 0)) {
+              authoritativeSizeSpk.add(u.spk_nomor);
+            }
+          });
+
+          // Fallback terakhir: SPK lama yang tspk_size & spk_ukuran-nya
+          // kosong. Urutan sumber qty order per size:
+          // 1) LHK Retur (lrd_order) — per size.
+          // 2) LHK Sublim (lsbd_jumlah_order) — hanya bila bukan total
+          //    order yang diulang untuk semua size.
+          // 3) Qty produksi LHK per size (agar rincian tetap tampil).
+          ukuranRows.forEach((u) => {
+            if (sizeFilled.has(u.spk_nomor)) return;
+            const spkNo = u.spk_nomor;
+            const spkQty = Number(u.spk_jumlah || 0);
+
+            const rtrSizes = rtrOrderMap[spkNo] || {};
+            const hasRtrOrder = Object.values(rtrSizes).some(
+              (q) => Number(q) > 0,
+            );
+
+            let orderSizes = null;
+
+            if (hasRtrOrder) {
+              orderSizes = rtrSizes;
+            } else {
+              const sublSizes = lhkOrderMap[spkNo] || {};
+              const sublEntries = Object.entries(sublSizes).filter(
+                ([, qty]) => Number(qty) > 0,
+              );
+              const allSameTotal =
+                sublEntries.length > 0 &&
+                sublEntries.every(([, qty]) => Number(qty) === spkQty);
+
+              // Bila semua size berisi total order yang sama dan size-nya
+              // lebih dari satu, angka itu tidak bisa dipakai per size.
+              if (!allSameTotal || sublEntries.length === 1) {
+                orderSizes = sublSizes;
+              }
+            }
+
+            if (!orderSizes) {
+              const prodSizes = lhkSizeMap[spkNo] || {};
+              const derived = {};
+              Object.entries(prodSizes).forEach(([size, komps]) => {
+                const qty = Object.values(komps).reduce(
+                  (sum, v) => sum + Number(v || 0),
+                  0,
+                );
+                if (qty > 0) derived[size] = qty;
+              });
+              orderSizes = derived;
+            }
+
+            const entries = Object.entries(orderSizes || {}).filter(
+              ([, qty]) => Number(qty) > 0,
+            );
+            if (entries.length === 0) return;
+
+            let totalSize = 0;
+            entries.forEach(([size, qty]) => {
+              const qtyNum = Number(qty);
+              sizes.push({
+                spks_nomor: spkNo,
+                spks_size: size,
+                spks_qty: qtyNum,
+              });
+              totalSize += qtyNum;
+            });
+
+            if (totalSize === spkQty) {
+              authoritativeSizeSpk.add(spkNo);
+            }
+          });
+        }
       }
     }
 
@@ -296,23 +491,28 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         sizeMap[spkNo] = [];
       }
 
-      const standardKomponen = spkKomponenMap[spkNo] || [
-        "BADAN DEPAN",
-        "BADAN BELAKANG",
-        "TANGAN/LENGAN",
-      ];
+      // Komponen wajib dari DB (tspk_komponen_potong / komponen eksplisit LHK).
+      // Jika SPK memang tidak punya rincian komponen, jangan mengarang
+      // BADAN DEPAN/BADAN BELAKANG/TANGAN-LENGAN; pakai "ALL SET" sesuai
+      // data LHK (lsbd_komponen/lrd_komponen) yang ada.
+      const standardKomponen = spkKomponenMap[spkNo] || ["ALL SET"];
 
       const lhkForThisSize =
-        (lhkSizeMap[spkNo] && lhkSizeMap[spkNo][sizeName]) || {};
+        (lhkSizeMap[spkNo] &&
+          lhkSizeMap[spkNo][String(sizeName ?? "").trim().toUpperCase()]) ||
+        {};
       const lhkGlobalAllSet =
         (lhkAllSetMap[spkNo] && lhkAllSetMap[spkNo]["ALL_SET_GLOBAL"]) || 0;
 
       const components = [];
 
       standardKomponen.forEach((komp) => {
+        const isAllSet = String(komp).trim().toUpperCase() === "ALL SET";
         let qtyCetakKomponen = Number(lhkForThisSize[komp] || 0);
 
-        if (lhkForThisSize["ALL SET"]) {
+        // Qty "ALL SET" berlaku untuk semua komponen, kecuali komponennya
+        // memang ALL SET itu sendiri (agar tidak terhitung dua kali).
+        if (!isAllSet && lhkForThisSize["ALL SET"]) {
           qtyCetakKomponen += Number(lhkForThisSize["ALL SET"]);
         }
         qtyCetakKomponen += lhkGlobalAllSet;
@@ -343,8 +543,13 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
 
       let finalKrgCetak = row.krg_Cetak; // Ambil bawaan dari SQL
 
-      // Jika kategori Paperprint ('2') atau Sublim ('3'), baru timpa dengan hitungan size
-      if (["2", "3"].includes(cbJenisIndex)) {
+      // Jika kategori Paperprint ('2') atau Sublim ('3'), baru timpa dengan
+      // hitungan size — hanya bila SPK memang punya daftar size. Bila
+      // tspk_size kosong, pakai hasil SQL (total LHK) agar tidak selalu 0.
+      if (
+        ["2", "3"].includes(cbJenisIndex) &&
+        authoritativeSizeSpk.has(row.NOMOR)
+      ) {
         finalKrgCetak = sizesForThisSpk.reduce(
           (sum, s) => sum + Number(s.size_krg_cetak || 0),
           0,
