@@ -7,6 +7,22 @@ const throwDbError = (message, error) => {
 
 // Parse rincian ukuran dari tspk.spk_ukuran, mis. "L=15, XL=20, 2XL=10".
 // String dimensi (mis. "3X1 M") atau nama size tanpa qty tidak diambil.
+const normalizeKey = (value) =>
+  String(value ?? "")
+    .trim()
+    .toUpperCase();
+
+// Filter mutasi produksi dari Sublim/RTR ke Gudang Potong P04 (GP001).
+// Alias wajib: h = tmutasiproduksi_hdr, d = tmutasiproduksi_dtl.
+const SUBLIM_TO_POTONG_P04_FILTER = `
+  h.mph_gdgtujuan = 'GP001'
+  AND (
+    h.mph_gdgasal IN ('GP031', 'GPM')
+    OR h.mph_kelompok LIKE '%SUBLIM%'
+    OR d.mpd_gdgp_asal IN ('GP031', 'GPM')
+  )
+`;
+
 const parseUkuranText = (text) => {
   const result = [];
   String(text || "")
@@ -175,12 +191,7 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
                    SUM(IFNULL(d.mpd_jumlah, 0)) AS qty_mutasi
             FROM tmutasiproduksi_dtl d
             INNER JOIN tmutasiproduksi_hdr h ON h.mph_nomor = d.mpd_mph_nomor
-            WHERE h.mph_gdgtujuan = 'GP001'
-              AND (
-                h.mph_gdgasal IN ('GP031', 'GPM')
-                OR h.mph_kelompok LIKE '%SUBLIM%'
-                OR d.mpd_gdgp_asal IN ('GP031', 'GPM')
-              )
+            WHERE ${SUBLIM_TO_POTONG_P04_FILTER}
             GROUP BY d.mpd_spk
         ) mut_p04 ON mut_p04.mut_spk = tspk.spk_nomor
       `;
@@ -246,8 +257,10 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
     // Ambil data size & komponen HANYA jika kategori Paperprint ('2') atau Sublim ('3')
     let sizes = [];
     let spkKomponenMap = {};
+    let spkKomponenKodeMap = {};
     let lhkSizeMap = {};
     let lhkAllSetMap = {};
+    let mutasiSizeMap = {};
     const authoritativeSizeSpk = new Set();
 
     if (["2", "3"].includes(cbJenisIndex)) {
@@ -264,12 +277,14 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
 
         // 1. Ambil daftar komponen wajib dari tspk_komponen_potong dan tspk_komponen HANYA untuk SPK yang tampil
         const kompSql = `
-        SELECT p.sk_nomor AS spk_nomor, k.bhn_name AS komponen_nama 
+        SELECT p.sk_nomor AS spk_nomor, p.sk_kode AS komponen_kode,
+          k.bhn_name AS komponen_nama 
         FROM tspk_komponen_potong p
         INNER JOIN tbahan k ON k.bhn_kode = p.sk_kode
         WHERE p.sk_nomor IN (${spkNomors})
         UNION
         SELECT DISTINCT ${prefix}_spk_nomor AS spk_nomor,
+          NULL AS komponen_kode,
           COALESCE(NULLIF(TRIM(${prefix}_komponen), ''), 'ALL SET') AS komponen_nama
         FROM ${tableDtl}
         WHERE ${prefix}_spk_nomor IN (${spkNomors}) 
@@ -283,6 +298,14 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
           }
           if (!spkKomponenMap[k.spk_nomor].includes(k.komponen_nama)) {
             spkKomponenMap[k.spk_nomor].push(k.komponen_nama);
+          }
+
+          const kompKode = normalizeKey(k.komponen_kode);
+          if (kompKode) {
+            if (!spkKomponenKodeMap[k.spk_nomor]) {
+              spkKomponenKodeMap[k.spk_nomor] = {};
+            }
+            spkKomponenKodeMap[k.spk_nomor][kompKode] = k.komponen_nama;
           }
         });
 
@@ -376,7 +399,57 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
           }
         });
 
-        // 3. Ambil data size dari tspk_size
+        // 3. Ambil data mutasi per ukuran/komponen untuk detail Sublim.
+        // Hanya mutasi Sublim/RTR -> Potong P04 yang dipakai, sama seperti
+        // kolom K-Mutasi P04 pada tabel utama.
+        if (cbJenisIndex === "3") {
+          const mutasiDetailSql = `
+          SELECT
+            d.mpd_spk AS spk_nomor,
+            d.mpd_size AS size,
+            d.mpd_bhn_kode AS komponen_kode,
+            d.mpd_nama AS komponen_nama,
+            SUM(IFNULL(d.mpd_jumlah, 0)) AS qty_mutasi
+          FROM tmutasiproduksi_dtl d
+          INNER JOIN tmutasiproduksi_hdr h ON h.mph_nomor = d.mpd_mph_nomor
+          WHERE d.mpd_spk IN (${spkNomors})
+            AND ${SUBLIM_TO_POTONG_P04_FILTER}
+          GROUP BY d.mpd_spk, d.mpd_size, d.mpd_bhn_kode, d.mpd_nama
+        `;
+          const [mutasiRows] = await pool.query(mutasiDetailSql);
+
+          mutasiRows.forEach((m) => {
+            const spk = m.spk_nomor;
+            if (!spk) return;
+
+            const sizeKey = normalizeKey(m.size) || "*";
+            const rawCode = normalizeKey(m.komponen_kode);
+            const rawName = normalizeKey(m.komponen_nama);
+            const codeMap = spkKomponenKodeMap[spk] || {};
+            const nameSet = new Set(
+              (spkKomponenMap[spk] || []).map((name) => normalizeKey(name)),
+            );
+
+            // Mutasi baru menyimpan kode/nama bahan (bukan nama komponen),
+            // sehingga diperlakukan sebagai ALL SET untuk ukuran tersebut.
+            // Mutasi lama yang menyimpan kode/nama komponen dipetakan ke
+            // komponen yang sesuai.
+            let kompKey = "ALL SET";
+            if (rawCode && codeMap[rawCode]) {
+              kompKey = normalizeKey(codeMap[rawCode]);
+            } else if (rawName && nameSet.has(rawName)) {
+              kompKey = rawName;
+            }
+
+            if (!mutasiSizeMap[spk]) mutasiSizeMap[spk] = {};
+            if (!mutasiSizeMap[spk][sizeKey]) mutasiSizeMap[spk][sizeKey] = {};
+            mutasiSizeMap[spk][sizeKey][kompKey] =
+              (mutasiSizeMap[spk][sizeKey][kompKey] || 0) +
+              Number(m.qty_mutasi || 0);
+          });
+        }
+
+        // 4. Ambil data size dari tspk_size
         const sizeSql = `
         SELECT spks_nomor, spks_size, spks_qty 
         FROM tspk_size 
@@ -522,6 +595,12 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
       const lhkGlobalAllSet =
         (lhkAllSetMap[spkNo] && lhkAllSetMap[spkNo]["ALL_SET_GLOBAL"]) || 0;
 
+      const sizeKey = normalizeKey(sizeName);
+      const mutasiForThisSize =
+        (mutasiSizeMap[spkNo] && mutasiSizeMap[spkNo][sizeKey]) || {};
+      const mutasiGlobal =
+        (mutasiSizeMap[spkNo] && mutasiSizeMap[spkNo]["*"]) || {};
+
       const components = [];
 
       standardKomponen.forEach((komp) => {
@@ -535,10 +614,23 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         }
         qtyCetakKomponen += lhkGlobalAllSet;
 
+        const kompKey = normalizeKey(komp);
+        const qtyMutasiKomponen =
+          Number(mutasiForThisSize[kompKey] || 0) +
+          (kompKey === "ALL SET"
+            ? 0
+            : Number(mutasiForThisSize["ALL SET"] || 0)) +
+          Number(mutasiGlobal[kompKey] || 0) +
+          (kompKey === "ALL SET"
+            ? 0
+            : Number(mutasiGlobal["ALL SET"] || 0));
+
         components.push({
           komponen_nama: komp,
           qty_cetak: qtyCetakKomponen,
           kurang_cetak: Math.max(0, sizeQty - qtyCetakKomponen),
+          qty_mutasi: qtyMutasiKomponen,
+          kurang_mutasi: Math.max(0, sizeQty - qtyMutasiKomponen),
         });
       });
 
@@ -548,10 +640,17 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
           : 0;
       const sizeKrgCetak = Math.max(0, sizeQty - minComponentCetak);
 
+      const minComponentMutasi =
+        components.length > 0
+          ? Math.min(...components.map((c) => c.qty_mutasi))
+          : 0;
+      const sizeKrgMutasi = Math.max(0, sizeQty - minComponentMutasi);
+
       sizeMap[spkNo].push({
         size_name: sizeName,
         size_qty: sizeQty,
         size_krg_cetak: sizeKrgCetak,
+        size_krg_mutasi: sizeKrgMutasi,
         components: components,
       });
     });
