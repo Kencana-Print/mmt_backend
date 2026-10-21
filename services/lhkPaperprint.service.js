@@ -1,6 +1,32 @@
 const pool = require("../config/db.config");
 const { format } = require("date-fns");
 
+// Parse rincian ukuran dari tspk.spk_ukuran, mis. "L=15, XL=20, 2XL=10".
+// Dipakai untuk mengisi J. Order per size saat tspk_size kosong.
+const parseUkuranText = (text) => {
+  const result = [];
+  String(text || "")
+    .split(/[,;\n]+/)
+    .forEach((part) => {
+      const s = part.trim();
+      if (!s) return;
+      const m = s.match(
+        /^([A-Za-z0-9][A-Za-z0-9/.\- ]*?)\s*(?:=|:)\s*(\d+)\s*(?:pcs|pc)?\s*$/i,
+      );
+      if (!m) return;
+      const size = m[1].trim().toUpperCase();
+      const qty = Number(m[2]);
+      if (!size || !Number.isFinite(qty) || qty <= 0) return;
+      result.push({ size, qty });
+    });
+  return result;
+};
+
+const toNumber = (v) => {
+  const n = parseFloat(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
 // Tanggal kosong/invalid => filter tanggal di-skip (tanpa klausa zero-date).
 const isValidDate = (v) =>
   typeof v === "string" &&
@@ -153,7 +179,12 @@ const getDetailsByNomor = async (nomor) => {
             
             d.lsbd_panjang AS Panjang, 
             d.lsbd_lebar AS Lebar, 
-            d.lsbd_jumlah_order AS J_Order, 
+            d.lsbd_jumlah_order AS J_Order_Simpan, 
+            d.lsbd_jumlah_order AS J_Order_SPK, 
+            IFNULL(sz.qty, 0) AS Order_Size,
+            IFNULL(rtr.qty_order, 0) AS Order_Rtr,
+            IFNULL(t.spk_jumlah, 0) AS spk_jumlah,
+            t.spk_ukuran AS spk_ukuran,
             d.lsbd_bahan AS Bahan, 
             d.lsbd_jumlah AS Jumlah,
             (d.lsbd_panjang * d.lsbd_lebar * d.lsbd_jumlah) AS Jumlah_Meter,
@@ -177,12 +208,74 @@ const getDetailsByNomor = async (nomor) => {
             UNION ALL 
             SELECT mspk_nomor, mspk_nama FROM tmemospk 
         ) x ON x.spk_nomor = d.lsbd_spk_nomor 
+        LEFT JOIN tspk t ON t.spk_nomor = d.lsbd_spk_nomor
+        LEFT JOIN (
+            SELECT spks_nomor,
+                   UPPER(TRIM(spks_size)) AS size,
+                   MAX(IFNULL(spks_qty, 0)) AS qty
+            FROM tspk_size
+            GROUP BY spks_nomor, UPPER(TRIM(spks_size))
+        ) sz
+            ON sz.spks_nomor = d.lsbd_spk_nomor
+           AND sz.size = UPPER(TRIM(d.lsbd_poid_size))
+        LEFT JOIN (
+            SELECT lrd_spk_nomor,
+                   UPPER(TRIM(lrd_poid_size)) AS poid_size,
+                   MAX(IFNULL(lrd_order, 0)) AS qty_order
+            FROM tlhk_rtr_dtl
+            WHERE lrd_poid_size IS NOT NULL
+              AND TRIM(lrd_poid_size) NOT IN ('', '-')
+            GROUP BY lrd_spk_nomor, UPPER(TRIM(lrd_poid_size))
+        ) rtr
+            ON rtr.lrd_spk_nomor = d.lsbd_spk_nomor
+           AND rtr.poid_size = UPPER(TRIM(d.lsbd_poid_size))
         WHERE d.lsbd_lsb_nomor = ?
         ORDER BY d.lsbd_no_urut
     `;
 
   const [rows] = await pool.query(sqlDetail, [nomor]);
-  return rows;
+
+  // J. Order per size: pakai tspk_size, lalu rincian spk_ukuran, lalu order RTR.
+  // Jika tidak ada rincian size sama sekali, tampilkan total order per SPK.
+  const ukuranMap = {};
+  rows.forEach((r) => {
+    const spk = r.Nomor_SPK;
+    if (!spk || Object.prototype.hasOwnProperty.call(ukuranMap, spk)) return;
+    const parsed = parseUkuranText(r.spk_ukuran);
+    if (parsed.length) {
+      ukuranMap[spk] = {};
+      parsed.forEach(({ size, qty }) => {
+        ukuranMap[spk][size] = qty;
+      });
+    } else {
+      ukuranMap[spk] = null;
+    }
+  });
+
+  return rows.map((r) => {
+    const size = String(r.Poi_Size || "").trim().toUpperCase();
+    const totalSpk = toNumber(r.J_Order_Simpan) || toNumber(r.spk_jumlah);
+    const orderPerSize =
+      toNumber(r.Order_Size) ||
+      toNumber(ukuranMap[r.Nomor_SPK]?.[size]) ||
+      toNumber(r.Order_Rtr) ||
+      0;
+
+    const {
+      J_Order_Simpan,
+      Order_Size,
+      Order_Rtr,
+      spk_jumlah,
+      spk_ukuran,
+      ...rest
+    } = r;
+    return {
+      ...rest,
+      J_Order: orderPerSize > 0 ? orderPerSize : totalSpk,
+      J_Order_SPK: totalSpk,
+      Order_Per_Size: orderPerSize > 0,
+    };
+  });
 };
 
 const saveLhkMesin = async (data) => {

@@ -280,12 +280,22 @@ const getBrowseList = async (
   let params = [`${startDate} 00:00:00`, `${endDate} 23:59:59`];
   let whereClause = `WHERE x.mspk_tanggal >= ? AND x.mspk_tanggal <= ?`;
 
-  if (cabang === "P02") {
+  const normCab = String(cabang || "")
+    .trim()
+    .toUpperCase();
+
+  // User cabang P05 hanya boleh melihat data MAP cabang P05
+  // atau data yang ditandai sublim (mspk_sublim = 'Y').
+  if (normCab === "P05") {
+    whereClause += ` AND (UPPER(TRIM(x.mspk_cab)) = 'P05' OR UPPER(TRIM(x.mspk_sublim)) = 'Y')`;
+  }
+
+  if (normCab === "P02") {
     whereClause += ` AND x.mspk_divisi IN (1,5)`;
   }
   if (isKaosan && isKaosan !== "KDC") {
     whereClause += ` AND x.mspk_divisi = 3`;
-  } else if (cabang === "P03" && isKaosan === "KDC") {
+  } else if (normCab === "P03" && isKaosan === "KDC") {
     whereClause += ` AND x.mspk_divisi IN (3,6)`;
   }
 

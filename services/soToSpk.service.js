@@ -684,7 +684,10 @@ const getSizeList = async (nomor) => {
   const [rows] = await db.query(
     `SELECT spks_size AS size, spks_qty AS qty,
             spks_a AS lb, spks_b AS pb,
-            spks_ld AS ld, spks_pl_pendek AS pl_pendek,
+            -- Data SPK lama menyimpan LD di spks_a; SPK baru menyimpannya
+            -- di spks_ld. Pakai spks_ld bila terisi, fallback ke spks_a.
+            COALESCE(NULLIF(spks_ld, 0), spks_a, 0) AS ld,
+            spks_pl_pendek AS pl_pendek,
             spks_pl_panjang AS pl_panjang, spks_p_bahu AS p_bahu,
             spks_l_lengan AS l_lengan, spks_l_manset AS l_manset,
             spks_l_pinggang AS l_pinggang, spks_p_celana AS p_celana,

@@ -63,44 +63,127 @@ const getNextPoNumber = async (date, prefix = "KP", connection) => {
 // Kolom pod_qty_terima bisa tidak sinkron (mis. PO diubah setelah barang diterima,
 // atau penerimaan lama dibuat sebelum trigger penambahan berjalan), sehingga qty
 // diterima juga diambil dari trec_mmt_dtl yang mereferensikan PO lewat rec_memo.
-// Nilai terbesar antara keduanya dianggap realisasi yang sebenarnya.
+//
+// Penilaian dilakukan per satuan (bukan per kode barang semata) agar:
+// - barang pengganti/substitusi dengan kode berbeda tetapi satuan sama tetap
+//   dihitung sebagai realisasi PO;
+// - qty diterima berlebih pada satu item tidak menutupi kekurangan item lain
+//   dalam satuan yang sama (masing-masing item dibatasi qty PO-nya).
+// Penerimaan keluar/retur (rec_type <> 0) tidak dihitung sebagai penerimaan PO.
 const PO_RECEIPT_STATUS_JOINS_SQL = `
   LEFT JOIN (
     SELECT
-      pi.pod_po_nomor,
-      SUM(
-        CASE
-          WHEN pi.qty_po > GREATEST(pi.qty_terima_po, IFNULL(rr.qty_terima, 0)) + 0.0001
-          THEN 1 ELSE 0
-        END
-      ) AS qty_kurang,
-      SUM(
-        CASE
-          WHEN GREATEST(pi.qty_terima_po, IFNULL(rr.qty_terima, 0)) > 0
-          THEN 1 ELSE 0
-        END
-      ) AS qty_terima_ada
+      v.pod_po_nomor,
+      SUM(CASE WHEN v.qty_po > v.qty_received + 0.01 THEN 1 ELSE 0 END) AS unit_kurang,
+      SUM(CASE WHEN v.qty_received > 0 THEN 1 ELSE 0 END) AS unit_terima_ada,
+      SUM(v.qty_po) AS qty_po_total,
+      SUM(v.qty_received) AS qty_received_total
     FROM (
       SELECT
-        pod_po_nomor,
-        pod_brg_kode,
-        SUM(IFNULL(pod_qty, 0)) AS qty_po,
-        SUM(IFNULL(pod_qty_terima, 0)) AS qty_terima_po
-      FROM tpo_mmt_dtl
-      GROUP BY pod_po_nomor, pod_brg_kode
-    ) pi
-    LEFT JOIN (
+        u.pod_po_nomor,
+        u.satuan,
+        SUM(u.qty_po) AS qty_po,
+        SUM(u.qty_received) AS qty_received
+      FROM (
+      -- Item PO yang kode barangnya juga ada di penerimaan
       SELECT
-        TRIM(rh.rec_memo) AS po_nomor,
-        TRIM(rd.recd_brg_kode) AS brg_kode,
-        SUM(IFNULL(rd.recd_qty_terima, 0)) AS qty_terima
-      FROM trec_mmt_hdr rh
-      INNER JOIN trec_mmt_dtl rd ON rd.recd_rec_nomor = rh.rec_nomor
-      WHERE rh.rec_memo IS NOT NULL AND TRIM(rh.rec_memo) <> ''
-      GROUP BY TRIM(rh.rec_memo), TRIM(rd.recd_brg_kode)
-    ) rr ON rr.po_nomor = pi.pod_po_nomor AND rr.brg_kode = pi.pod_brg_kode
-    GROUP BY pi.pod_po_nomor
-  ) st ON st.pod_po_nomor = h.po_nomor
+        pi.pod_po_nomor,
+        pi.satuan,
+        SUM(IFNULL(pi.qty_po, 0)) AS qty_po,
+        SUM(
+          LEAST(
+            IFNULL(pi.qty_po, 0),
+            GREATEST(IFNULL(pi.qty_terima_po, 0), IFNULL(rr.qty_terima, 0))
+          )
+        ) AS qty_received
+      FROM (
+        SELECT
+          UPPER(TRIM(pod_po_nomor)) AS pod_po_nomor,
+          TRIM(pod_brg_kode) AS brg_kode,
+          UPPER(TRIM(IFNULL(pod_brg_satuan, ''))) AS satuan,
+          SUM(IFNULL(pod_qty, 0)) AS qty_po,
+          SUM(IFNULL(pod_qty_terima, 0)) AS qty_terima_po
+        FROM tpo_mmt_dtl
+        GROUP BY UPPER(TRIM(pod_po_nomor)), TRIM(pod_brg_kode), UPPER(TRIM(IFNULL(pod_brg_satuan, '')))
+      ) pi
+      LEFT JOIN (
+        SELECT
+          r.pod_po_nomor,
+          r.brg_kode,
+          SUM(r.qty_terima) AS qty_terima
+        FROM (
+          SELECT
+            x.pod_po_nomor,
+            x.brg_kode,
+            x.satuan,
+            SUM(x.qty_terima) AS qty_terima
+          FROM (
+            SELECT
+              UPPER(TRIM(rh.rec_memo)) AS pod_po_nomor,
+              TRIM(rd.recd_brg_kode) AS brg_kode,
+              UPPER(TRIM(IFNULL(rd.recd_brg_satuan, ''))) AS satuan,
+              IFNULL(rd.recd_qty_terima, 0) AS qty_terima
+            FROM trec_mmt_hdr rh
+            INNER JOIN trec_mmt_dtl rd
+              ON rd.recd_rec_nomor = rh.rec_nomor
+            WHERE IFNULL(rh.rec_type, 0) = 0
+              AND rh.rec_memo IS NOT NULL
+              AND TRIM(rh.rec_memo) <> ''
+          ) x
+          GROUP BY x.pod_po_nomor, x.brg_kode, x.satuan
+        ) r
+        GROUP BY r.pod_po_nomor, r.brg_kode
+      ) rr
+        ON rr.pod_po_nomor = pi.pod_po_nomor
+       AND rr.brg_kode = pi.brg_kode
+      GROUP BY pi.pod_po_nomor, pi.satuan
+
+      UNION ALL
+
+      -- Item penerimaan yang kode barangnya tidak ada di PO (substitusi)
+      SELECT
+        rr.pod_po_nomor,
+        rr.satuan,
+        0 AS qty_po,
+        SUM(rr.qty_terima) AS qty_received
+      FROM (
+        SELECT
+          x.pod_po_nomor,
+          x.brg_kode,
+          x.satuan,
+          SUM(x.qty_terima) AS qty_terima
+        FROM (
+          SELECT
+            UPPER(TRIM(rh.rec_memo)) AS pod_po_nomor,
+            TRIM(rd.recd_brg_kode) AS brg_kode,
+            UPPER(TRIM(IFNULL(rd.recd_brg_satuan, ''))) AS satuan,
+            IFNULL(rd.recd_qty_terima, 0) AS qty_terima
+          FROM trec_mmt_hdr rh
+          INNER JOIN trec_mmt_dtl rd
+            ON rd.recd_rec_nomor = rh.rec_nomor
+          WHERE IFNULL(rh.rec_type, 0) = 0
+            AND rh.rec_memo IS NOT NULL
+            AND TRIM(rh.rec_memo) <> ''
+        ) x
+        GROUP BY x.pod_po_nomor, x.brg_kode, x.satuan
+      ) rr
+      LEFT JOIN (
+        SELECT
+          UPPER(TRIM(pod_po_nomor)) AS pod_po_nomor,
+          TRIM(pod_brg_kode) AS brg_kode,
+          UPPER(TRIM(IFNULL(pod_brg_satuan, ''))) AS satuan
+        FROM tpo_mmt_dtl
+        GROUP BY UPPER(TRIM(pod_po_nomor)), TRIM(pod_brg_kode), UPPER(TRIM(IFNULL(pod_brg_satuan, '')))
+      ) pi
+        ON pi.pod_po_nomor = rr.pod_po_nomor
+       AND pi.brg_kode = rr.brg_kode
+      WHERE pi.brg_kode IS NULL
+      GROUP BY rr.pod_po_nomor, rr.satuan
+      ) u
+      GROUP BY u.pod_po_nomor, u.satuan
+    ) v
+    GROUP BY v.pod_po_nomor
+  ) st ON st.pod_po_nomor = UPPER(TRIM(h.po_nomor))
 `;
 
 const PO_STATUS_CASE_SQL = `
@@ -108,11 +191,12 @@ const PO_STATUS_CASE_SQL = `
     -- 1. Ditutup manual oleh user
     WHEN h.po_isclosed = 1 THEN 'CLOSE'
 
-    -- 2. Semua item sudah diterima penuh
-    WHEN IFNULL(st.qty_kurang, 0) = 0 THEN 'CLOSED'
+    -- 2. Semua satuan sudah terpenuhi (termasuk substitusi barang)
+    WHEN IFNULL(st.qty_po_total, 0) > 0
+         AND IFNULL(st.unit_kurang, 0) = 0 THEN 'CLOSED'
 
     -- 3. Sudah ada penerimaan, tetapi belum penuh
-    WHEN IFNULL(st.qty_terima_ada, 0) > 0 THEN 'ONPROSES'
+    WHEN IFNULL(st.unit_terima_ada, 0) > 0 THEN 'ONPROSES'
 
     -- 4. Belum ada penerimaan sama sekali
     ELSE 'OPEN'

@@ -769,13 +769,16 @@ exports.getSpkForSublimLookup = async (keyword) => {
                 combined.Nama AS nama_pekerjaan,
                 combined.Tanggal,
                 combined.Jumlah AS Qty_Order,
+                combined.Ukuran AS Ukuran,
                 combined.Bahan AS Nama_Bahan_Rencana,
                 combined.Tipe_SPK,
                 combined.Divisi,
                 
-                -- Ambil Size dari tspk_size
+                -- Ambil Size & qty order per size dari tspk_size
                 IFNULL(z.spks_size, '') AS Size,
                 IFNULL(z.spks_size, '') AS poid_size,
+                IFNULL(z.spks_qty, 0) AS Size_Qty,
+                IFNULL(z.spks_qty, 0) AS spk_qty,
 
                 -- Ambil Panjang & Lebar dari LHK Pola Grading (jika ada)
                 COALESCE(g.ldg_panjang, combined.Panjang) AS Panjang,
