@@ -297,8 +297,9 @@ const getBrowseList = async (
   const query = `
     SELECT 
       x.mspk_nomor AS Nomor, x.user_create AS MO, x.mspk_cmo AS CMO, 
-      x.mspk_tanggal AS Tanggal, x.mspk_dateline AS Dateline,
-      IFNULL(IFNULL(k.date_modify, k.date_create), "") AS TglBast, 
+      DATE_FORMAT(x.mspk_tanggal, '%Y-%m-%d') AS Tanggal,
+      DATE_FORMAT(x.mspk_dateline, '%Y-%m-%d') AS Dateline,
+      IFNULL(DATE_FORMAT(IFNULL(k.date_modify, k.date_create), '%Y-%m-%d'), "") AS TglBast, 
       IFNULL(DATEDIFF(IFNULL(k.date_modify, k.date_create), x.mspk_tanggal), 0) AS SelisihBastMap,
       IF(k.date_create IS NULL, "BELUM", "SUDAH") AS Berita_Acara,
       d.divisi AS Divisi, x.mspk_cab AS Cab, x.mspk_workshop AS Workshop, 
@@ -311,20 +312,20 @@ const getBrowseList = async (
       x.mspk_rencana_order AS Rencana, x.mspk_tipe AS Tipe, ${hargaCol}
       s.sal_nama AS Salesman, x.date_create AS Created, 
       x.mspk_revisi_no AS Revisi, x.mspk_referensi AS NoReferensi,
-      IF(x.mspk_estimasijadi="1899-12-30", "", x.mspk_estimasijadi) AS EstimasiJadi, 
+      IF(x.mspk_estimasijadi="1899-12-30", "", DATE_FORMAT(x.mspk_estimasijadi, '%Y-%m-%d')) AS EstimasiJadi, 
       x.mspk_close AS CloseStatus,
       IFNULL(
         (SELECT so_nomor FROM tsalesorder WHERE so_memo = x.mspk_nomor ORDER BY so_tanggal DESC LIMIT 1),
         (SELECT spk_nomor FROM tspk WHERE spk_memo = x.mspk_nomor ORDER BY spk_tanggal DESC LIMIT 1)
       ) AS SPK, 
-      IF(x.mspk_divisi=5, m.lpr_tanggal, z.lds_tgl) AS Design_Tanggal,
+      DATE_FORMAT(IF(x.mspk_divisi=5, m.lpr_tanggal, z.lds_tgl), '%Y-%m-%d') AS Design_Tanggal,
       z.lds_user AS Design_User, z.lds_note AS Design_Note, 
       IFNULL((
         SELECT IFNULL(IF(pin_acc="" AND pin_dipakai="","WAIT",IF(pin_acc="Y" AND pin_dipakai="","ACC",IF(pin_acc="Y" AND pin_dipakai="Y","",IF(pin_acc="N","TOLAK","")))), "")
         FROM tspk_pin5 WHERE pin_trs="MAP" AND pin_nomor=x.mspk_nomor ORDER BY pin_urut DESC LIMIT 1
       ),"") AS Ngedit,
       x.mspk_newdesign AS Design_Baru, x.mspk_designdone AS Design_Done, x.mspk_keterangan AS Keterangan,
-      x.mspk_acc_customer AS AccCustomer, x.mspk_acc_tanggal AS AccTanggal
+      x.mspk_acc_customer AS AccCustomer, DATE_FORMAT(x.mspk_acc_tanggal, '%Y-%m-%d') AS AccTanggal
     FROM tmemospk x
     LEFT JOIN tcustomer c ON x.mspk_cus_kode = c.cus_kode
     LEFT JOIN tsales s ON x.mspk_sal_kode = s.sal_kode

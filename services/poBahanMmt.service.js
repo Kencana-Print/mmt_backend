@@ -59,6 +59,66 @@ const getNextPoNumber = async (date, prefix = "KP", connection) => {
   return `${padded}${suffix}`;
 };
 
+// Status PO dihitung dari realisasi penerimaan, bukan hanya kolom pod_qty_terima.
+// Kolom pod_qty_terima bisa tidak sinkron (mis. PO diubah setelah barang diterima,
+// atau penerimaan lama dibuat sebelum trigger penambahan berjalan), sehingga qty
+// diterima juga diambil dari trec_mmt_dtl yang mereferensikan PO lewat rec_memo.
+// Nilai terbesar antara keduanya dianggap realisasi yang sebenarnya.
+const PO_RECEIPT_STATUS_JOINS_SQL = `
+  LEFT JOIN (
+    SELECT
+      pi.pod_po_nomor,
+      SUM(
+        CASE
+          WHEN pi.qty_po > GREATEST(pi.qty_terima_po, IFNULL(rr.qty_terima, 0)) + 0.0001
+          THEN 1 ELSE 0
+        END
+      ) AS qty_kurang,
+      SUM(
+        CASE
+          WHEN GREATEST(pi.qty_terima_po, IFNULL(rr.qty_terima, 0)) > 0
+          THEN 1 ELSE 0
+        END
+      ) AS qty_terima_ada
+    FROM (
+      SELECT
+        pod_po_nomor,
+        pod_brg_kode,
+        SUM(IFNULL(pod_qty, 0)) AS qty_po,
+        SUM(IFNULL(pod_qty_terima, 0)) AS qty_terima_po
+      FROM tpo_mmt_dtl
+      GROUP BY pod_po_nomor, pod_brg_kode
+    ) pi
+    LEFT JOIN (
+      SELECT
+        TRIM(rh.rec_memo) AS po_nomor,
+        TRIM(rd.recd_brg_kode) AS brg_kode,
+        SUM(IFNULL(rd.recd_qty_terima, 0)) AS qty_terima
+      FROM trec_mmt_hdr rh
+      INNER JOIN trec_mmt_dtl rd ON rd.recd_rec_nomor = rh.rec_nomor
+      WHERE rh.rec_memo IS NOT NULL AND TRIM(rh.rec_memo) <> ''
+      GROUP BY TRIM(rh.rec_memo), TRIM(rd.recd_brg_kode)
+    ) rr ON rr.po_nomor = pi.pod_po_nomor AND rr.brg_kode = pi.pod_brg_kode
+    GROUP BY pi.pod_po_nomor
+  ) st ON st.pod_po_nomor = h.po_nomor
+`;
+
+const PO_STATUS_CASE_SQL = `
+  CASE
+    -- 1. Ditutup manual oleh user
+    WHEN h.po_isclosed = 1 THEN 'CLOSE'
+
+    -- 2. Semua item sudah diterima penuh
+    WHEN IFNULL(st.qty_kurang, 0) = 0 THEN 'CLOSED'
+
+    -- 3. Sudah ada penerimaan, tetapi belum penuh
+    WHEN IFNULL(st.qty_terima_ada, 0) > 0 THEN 'ONPROSES'
+
+    -- 4. Belum ada penerimaan sama sekali
+    ELSE 'OPEN'
+  END
+`;
+
 const formatDateForPrint = (dateValue) => {
   if (!dateValue) return "N/A";
   if (dateValue instanceof Date) return format(dateValue, "dd/MM/yyyy");
@@ -97,33 +157,12 @@ const getPoMmtData = async (startDate, endDate, supplier) => {
       h.po_gdg_kode AS Cab,
       h.po_acc AS Acc,
 
-      CASE
-        -- 1. Cek jika PO ditutup secara manual oleh user
-        WHEN h.po_isclosed = 1 THEN 'CLOSE'
-
-        -- 2. Cek jika SEMUA item dalam PO sudah diterima penuh (qty_terima >= qty)
-        -- Jika TIDAK ADA satu pun item yang qty_terimanya masih kurang dari pod_qty, maka CLOSED
-        WHEN NOT EXISTS (
-          SELECT 1 FROM tpo_mmt_dtl d 
-          WHERE d.pod_po_nomor = h.po_nomor 
-          AND d.pod_qty_terima < d.pod_qty
-        ) THEN 'CLOSED'
-
-        -- 3. Cek jika ADA item yang sudah mulai diterima (qty_terima > 0)
-        -- Karena kondisi 'Full' sudah dicek di atas, maka yang masuk ke sini pasti 'Sebagian'
-        WHEN EXISTS (
-          SELECT 1 FROM tpo_mmt_dtl d 
-          WHERE d.pod_po_nomor = h.po_nomor 
-          AND d.pod_qty_terima > 0
-        ) THEN 'ONPROSES'
-
-        -- 4. Jika belum ada penerimaan sama sekali
-        ELSE 'OPEN'
-      END AS Status,
+      ${PO_STATUS_CASE_SQL} AS Status,
       h.po_istax AS IsTax, 
       h.po_memo AS Keterangan
     FROM tpo_mmt_hdr h
     LEFT JOIN tsupplier s ON h.po_sup_kode = s.sup_kode
+    ${PO_RECEIPT_STATUS_JOINS_SQL}
     WHERE ${dateConds.length ? dateConds.join(" AND ") : "1=1"}
     ${supplier ? `AND (h.po_sup_kode LIKE ? OR s.sup_nama LIKE ?)` : ""}
     ORDER BY h.po_tanggal DESC, h.po_nomor DESC
@@ -563,22 +602,10 @@ const getPOLookupData = async (keyword) => {
                     (SELECT SUM(d.pod_qty * d.pod_harga) 
                      FROM tpo_mmt_dtl d 
                      WHERE d.pod_po_nomor = h.po_nomor) AS TotalHarga,
-                    CASE
-                        WHEN h.po_isclosed = 1 THEN 'CLOSE'
-                        WHEN NOT EXISTS (
-                            SELECT 1 FROM tpo_mmt_dtl d 
-                            WHERE d.pod_po_nomor = h.po_nomor 
-                            AND d.pod_qty_terima < d.pod_qty
-                        ) THEN 'CLOSED'
-                        WHEN EXISTS (
-                            SELECT 1 FROM tpo_mmt_dtl d 
-                            WHERE d.pod_po_nomor = h.po_nomor 
-                            AND d.pod_qty_terima > 0
-                        ) THEN 'ONPROSES'
-                        ELSE 'OPEN'
-                    END AS Status
+                    ${PO_STATUS_CASE_SQL} AS Status
                 FROM tpo_mmt_hdr h
                 LEFT JOIN tsupplier s ON h.po_sup_kode = s.sup_kode
+                ${PO_RECEIPT_STATUS_JOINS_SQL}
             ) AS LookupTable
             WHERE 1=1 -- <--- UBAH DI SINI (Hapus Status IN ('OPEN', 'ONPROSES'))
         `;
