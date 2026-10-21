@@ -741,10 +741,35 @@ const getPODetail = async (poNomor) => {
         d.pod_harga AS harga, d.pod_discpr AS diskon, d.pod_spk_nomor AS spk,
         d.pod_mb_nomor AS mb_nomor, 
         COALESCE(b.brg_panjang, 0) AS panjang, COALESCE(b.brg_lebar, 0) AS lebar,
+        d.pod_qty_terima AS qty_terima_po,
+        -- Qty yang sudah diterima: ambil dari realisasi penerimaan (rec_memo = PO),
+        -- lalu bandingkan dengan kolom pod_qty_terima agar data lama tetap terhitung.
+        LEAST(
+          IFNULL(d.pod_qty, 0),
+          GREATEST(
+            IFNULL(d.pod_qty_terima, 0),
+            IFNULL(rr.qty_terima, 0)
+          )
+        ) AS sudah_terima,
         d.pod_qty * d.pod_m2 * d.pod_harga * (1 - d.pod_discpr / 100) AS total
       FROM tpo_mmt_dtl d
       LEFT JOIN tbarang_mmt b ON d.pod_brg_kode = b.brg_kode
       LEFT JOIN tgarmen_brg t ON d.pod_brg_kode = t.brg_kode
+      LEFT JOIN (
+        SELECT
+          UPPER(TRIM(rh.rec_memo)) AS po_nomor,
+          TRIM(rd.recd_brg_kode) AS brg_kode,
+          SUM(IFNULL(rd.recd_qty_terima, 0)) AS qty_terima
+        FROM trec_mmt_hdr rh
+        INNER JOIN trec_mmt_dtl rd
+          ON rd.recd_rec_nomor = rh.rec_nomor
+        WHERE IFNULL(rh.rec_type, 0) = 0
+          AND rh.rec_memo IS NOT NULL
+          AND TRIM(rh.rec_memo) <> ''
+        GROUP BY UPPER(TRIM(rh.rec_memo)), TRIM(rd.recd_brg_kode)
+      ) rr
+        ON rr.po_nomor = UPPER(TRIM(d.pod_po_nomor))
+       AND rr.brg_kode = TRIM(d.pod_brg_kode)
       WHERE d.pod_po_nomor = ? 
       ORDER BY d.pod_nourut
     `,

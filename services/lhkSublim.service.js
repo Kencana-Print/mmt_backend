@@ -21,15 +21,15 @@ const getAllHeaders = async (startDate, endDate) => {
              FROM tlhk_rtr_dtl 
              WHERE lrd_lr_nomor = lr_nomor) AS total_meter,
             CASE 
-                WHEN SUM(COALESCE(lrd_qty_mutasi, 0)) = 0 THEN 'open'
-                WHEN SUM(COALESCE(lrd_qty_mutasi, 0)) < SUM(lrd_jumlah) THEN 'progress'
-                ELSE 'close'
+                WHEN COALESCE(lr_mutasi, 0) = 1
+                  OR SUM(COALESCE(lrd_qty_mutasi, 0)) > 0 THEN 'close'
+                ELSE 'open'
             END AS lsb_status
         FROM tlhk_rtr_hdr 
         LEFT JOIN tGUDANG ON gdg_kode = lr_gdg_kode
         LEFT JOIN tlhk_rtr_dtl ON lrd_lr_nomor = lr_nomor
         ${hasDate ? "WHERE lr_tanggal BETWEEN ? AND ?" : ""}
-        GROUP BY lr_nomor, lr_tanggal, lr_gdg_kode, gdg_nama
+        GROUP BY lr_nomor, lr_tanggal, lr_gdg_kode, gdg_nama, lr_mutasi
         ORDER BY lr_tanggal DESC, lr_nomor DESC
     `;
   const [rows] = await pool.query(sql, hasDate ? [startDate, endDate] : []);

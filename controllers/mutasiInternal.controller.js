@@ -1,17 +1,29 @@
 const mutasiInternalService = require('../services/mutasiInternal.service');
 
+// Ambil identitas user yang login. JWT MMT memakai kdUser, sedangkan
+// middleware lain bisa memakai kode/username. Fallback terakhir SYSTEM
+// hanya untuk request tanpa autentikasi sama sekali.
+const getLoginUser = (req) =>
+    req.user?.username ||
+    req.user?.kdUser ||
+    req.user?.kode ||
+    req.user?.user_kode ||
+    "SYSTEM";
+
 exports.createMutasi = async (req, res) => {
     try {
         const dataPayload = {
             Nomor: req.body.header?.nomor,
             Tanggal: req.body.header?.tanggal,
-            BagianAsal: req.body.header?.bagian_asal,
-            BagianTujuan: req.body.header?.bagian_tujuan,
+            GudangAsal: req.body.header?.bagian_asal,
+            GudangTujuan: req.body.header?.bagian_tujuan,
             Keterangan: req.body.header?.keterangan,
+            Type: req.body.header?.type,
+            Cabang: req.user?.cabang || req.user?.cab,
             Details: req.body.details
         };
 
-        const result = await mutasiInternalService.saveMutasiInternal(dataPayload, false, req.user?.username);
+        const result = await mutasiInternalService.saveMutasiInternal(dataPayload, false, getLoginUser(req));
         res.status(201).json({
             success: true,
             message: "Data mutasi internal berhasil disimpan",
@@ -28,13 +40,15 @@ exports.updateMutasi = async (req, res) => {
         const dataPayload = {
             Nomor: nomor,
             Tanggal: req.body.header?.tanggal,
-            BagianAsal: req.body.header?.bagian_asal,
-            BagianTujuan: req.body.header?.bagian_tujuan,
+            GudangAsal: req.body.header?.bagian_asal,
+            GudangTujuan: req.body.header?.bagian_tujuan,
             Keterangan: req.body.header?.keterangan,
+            Type: req.body.header?.type,
+            Cabang: req.user?.cabang || req.user?.cab,
             Details: req.body.details
         };
         
-        const result = await mutasiInternalService.saveMutasiInternal(dataPayload, true, req.user?.username);
+        const result = await mutasiInternalService.saveMutasiInternal(dataPayload, true, getLoginUser(req));
         res.status(200).json({
             success: true,
             message: `Data mutasi internal ${nomor} berhasil diperbarui`,
@@ -53,7 +67,11 @@ exports.getAllMutasi = async (req, res) => {
             return res.status(400).json({ success: false, message: "Filter tanggal (startDate & endDate) diperlukan" });
         }
         
-        const rawData = await mutasiInternalService.getMutasiData(startDate, endDate);
+        const rawData = await mutasiInternalService.getMutasiData(
+            startDate,
+            endDate,
+            getLoginUser(req)
+        );
         
         // Pastikan format key sesuai dengan masterHeaders di Vue:
         // { title: "No. Mutasi", key: "Nomor_Mutasi" }, { title: "Tanggal", key: "Tanggal" }, dsb.
@@ -91,7 +109,11 @@ exports.getDetailMutasi = async (req, res) => {
             Size: d.Size,
             Nama_Komponen: d.Nama_Komponen,
             Qty_Mutasi: d.Qty_Mutasi,
-            Stok_Sublim_Lama: d.Stok_Sublim_Lama
+            Stok_Sublim_Lama: d.Stok_Sublim_Lama,
+            Tanggal: d.Tanggal,
+            Bagian_Asal: d.Bagian_Asal,
+            Bagian_Tujuan: d.Bagian_Tujuan,
+            Keterangan: d.Keterangan
         }));
 
         res.status(200).json({ success: true, data: mappedDetails });
