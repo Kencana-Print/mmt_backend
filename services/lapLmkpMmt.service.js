@@ -32,6 +32,8 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
     let joinLhkCetak = "";
     let fieldJmlCetak = "";
     let joinSizeLhk = "";
+    let joinMutasiP04 = "";
+    let fieldKrgMutasiP04 = "0 AS krg_mutasi_p04";
     let selectMesinFields = `
         0 AS mt01, 0 AS mt02, 0 AS mt03, 0 AS mt04, 0 AS mt05, 0 AS mi,
         0 AS mx01, 0 AS mx02, 0 AS mx03, 0 AS mx04, 0 AS mx05,
@@ -162,6 +164,27 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
             GROUP BY lrd_spk_nomor, lrd_poid_size, lrd_komponen
         ) sz_lhk ON sz_lhk.lrd_spk_nomor = spks_nomor AND sz_lhk.lrd_poid_size = spks_size
       `;
+
+      // K-Mutasi P04 = qty order yang belum dimutasi dari Sublim (RTR/P04)
+      // ke Gudang Potong P04 (GP001). Sumber qty mutasi: tmutasiproduksi_*.
+      // Mutasi lanjutan dari Potong (GP001 -> QC Potong, DC, dll.) tidak
+      // dihitung karena asalnya bukan gudang Sublim.
+      joinMutasiP04 = `
+        LEFT JOIN (
+            SELECT d.mpd_spk AS mut_spk,
+                   SUM(IFNULL(d.mpd_jumlah, 0)) AS qty_mutasi
+            FROM tmutasiproduksi_dtl d
+            INNER JOIN tmutasiproduksi_hdr h ON h.mph_nomor = d.mpd_mph_nomor
+            WHERE h.mph_gdgtujuan = 'GP001'
+              AND (
+                h.mph_gdgasal IN ('GP031', 'GPM')
+                OR h.mph_kelompok LIKE '%SUBLIM%'
+                OR d.mpd_gdgp_asal IN ('GP031', 'GPM')
+              )
+            GROUP BY d.mpd_spk
+        ) mut_p04 ON mut_p04.mut_spk = tspk.spk_nomor
+      `;
+      fieldKrgMutasiP04 = "GREATEST(0, spk_jumlah - IFNULL(mut_p04.qty_mutasi, 0)) AS krg_mutasi_p04";
     }
     // Query Utama Monitoring LMKP
     const sql = `
@@ -178,6 +201,7 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
             spk_jumlah - IFNULL(gg.jcoly, 0) AS krg_coly,
             
             spk_jumlah - IF(spk_jumlah < ${fieldJmlCetak}, spk_jumlah, ${fieldJmlCetak}) - IFNULL(h.cetak_luarx, 0) AS krg_Cetak,
+            ${fieldKrgMutasiP04},
 
             (spk_jumlah - spk_jumlah_kirim) * spk_panjang * IF(spk_divisi=5, IFNULL(spk_lebar, 0), 1) AS krg_kirim_meter,
             (spk_jumlah - IF(spk_jumlah < ${fieldJmlCetak}, spk_jumlah, ${fieldJmlCetak}) - IFNULL(h.cetak_luarx, 0)) * spk_panjang * IFNULL(spk_lebar, 0) AS krg_Cetak_meter,
@@ -198,6 +222,7 @@ exports.getMonitoringData = async (cbJenisIndex, startDate, endDate) => {
         ) h ON h.poe_spk = spk_nomor
 
         ${joinLhkCetak}
+        ${joinMutasiP04}
 
         LEFT JOIN (
             SELECT lfd_spk_nomor, 
