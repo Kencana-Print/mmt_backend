@@ -100,8 +100,10 @@ const getBrowseList = async (filters = {}) => {
         s.spk_so_ref AS SO,
         s.spk_nomor AS Nomor,
         s.user_create AS MO, s.spk_cmo AS CMO,
+        DATE_FORMAT((SELECT so_dt.so_tanggal FROM tsalesorder so_dt WHERE so_dt.so_nomor = s.spk_so_ref LIMIT 1), '%Y-%m-%d') AS SO_Tanggal,
         s.spk_tanggal AS Tanggal,
         s.spk_dateline AS Dateline,
+        DATE_FORMAT(s.spk_cmo_tanggal, '%Y-%m-%d %H:%i:%s') AS CMO_Tanggal,
         s.spk_statuskerja AS Kepentingan, v.divisi AS Divisi,
         s.spk_cus_kode AS KodeCustomer, ${custNameCol}
         s.spk_nama AS Nama, s.spk_ukuran AS Ukuran,
@@ -189,8 +191,10 @@ const getBrowseList = async (filters = {}) => {
         so.so_nomor AS SO,
         "" AS Nomor,
         so.user_create AS MO, so.so_cmo AS CMO,
+        DATE_FORMAT(so.so_tanggal, '%Y-%m-%d') AS SO_Tanggal,
         DATE_FORMAT(so.so_tanggal, '%Y-%m-%d') AS Tanggal, 
         DATE_FORMAT(so.so_dateline, '%Y-%m-%d') AS Dateline,
+        DATE_FORMAT(so.so_cmo_tanggal, '%Y-%m-%d %H:%i:%s') AS CMO_Tanggal,
         so.so_statuskerja AS Kepentingan, v.divisi AS Divisi,
         so.so_cus_kode AS KodeCustomer, ${custNameCol}
         so.so_nama AS Nama, so.so_ukuran AS Ukuran,
