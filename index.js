@@ -120,6 +120,16 @@ const allowedOrigins = [
   "https://103.94.238.252",
 ];
 
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  if (process.env.NODE_ENV !== "production") {
+    if (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) return true;
+    if (/^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin)) return true;
+  }
+  return false;
+};
+
 // Folder dan direktori yang dibutuhkan
 app.use("/images", express.static(imageFolderPath));
 const requiredDirs = [
@@ -131,8 +141,7 @@ const requiredDirs = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) {
+      if (isAllowedOrigin(origin)) {
         return callback(null, true);
       } else {
         console.warn("❌ CORS Blocked:", origin);
