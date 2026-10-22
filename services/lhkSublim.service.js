@@ -9,8 +9,40 @@ const isValidDate = (v) =>
 
 const NOMERATOR = "MMT-LHK-R";
 
-const getAllHeaders = async (startDate, endDate) => {
+// getAllHeaders(startDate, endDate, keyword)
+// Keyword dapat berupa: Nomor LHK, kode/nama Gudang, atau Nomor/Nama SPK
+// (pencarian SPK dilakukan pada tabel detail tlhk_rtr_dtl via EXISTS,
+//  sehingga agregasi total_meter & status mutasi tidak terganggu).
+const getAllHeaders = async (startDate, endDate, keyword = "") => {
   const hasDate = isValidDate(startDate) && isValidDate(endDate);
+  const kw = (keyword || "").toString().trim();
+
+  const clauses = [];
+  const params = [];
+
+  if (hasDate) {
+    clauses.push("lr_tanggal BETWEEN ? AND ?");
+    params.push(startDate, endDate);
+  }
+
+  if (kw) {
+    const like = `%${kw}%`;
+    clauses.push(
+      `(lr_nomor LIKE ?
+        OR lr_gdg_kode LIKE ?
+        OR gdg_nama LIKE ?
+        OR EXISTS (
+            SELECT 1
+            FROM tlhk_rtr_dtl spk
+            WHERE spk.lrd_lr_nomor = lr_nomor
+              AND (spk.lrd_spk_nomor LIKE ? OR spk.lrd_spk_nama LIKE ?)
+        ))`,
+    );
+    params.push(like, like, like, like, like);
+  }
+
+  const whereSql = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+
   const sql = `
         SELECT 
             lr_nomor AS nomor, 
@@ -28,11 +60,11 @@ const getAllHeaders = async (startDate, endDate) => {
         FROM tlhk_rtr_hdr 
         LEFT JOIN tGUDANG ON gdg_kode = lr_gdg_kode
         LEFT JOIN tlhk_rtr_dtl ON lrd_lr_nomor = lr_nomor
-        ${hasDate ? "WHERE lr_tanggal BETWEEN ? AND ?" : ""}
+        ${whereSql}
         GROUP BY lr_nomor, lr_tanggal, lr_gdg_kode, gdg_nama, lr_mutasi
         ORDER BY lr_tanggal DESC, lr_nomor DESC
     `;
-  const [rows] = await pool.query(sql, hasDate ? [startDate, endDate] : []);
+  const [rows] = await pool.query(sql, params);
   return rows;
 };
 

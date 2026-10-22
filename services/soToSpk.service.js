@@ -100,7 +100,21 @@ const getBrowseList = async (filters = {}) => {
         s.spk_so_ref AS SO,
         s.spk_nomor AS Nomor,
         s.user_create AS MO, s.spk_cmo AS CMO,
-        DATE_FORMAT((SELECT so_dt.so_tanggal FROM tsalesorder so_dt WHERE so_dt.so_nomor = s.spk_so_ref LIMIT 1), '%Y-%m-%d') AS SO_Tanggal,
+        /* SO_Tanggal — UNION-aware (sama pola dgn getSoHeaderUnified):
+           1) SO baru di tsalesorder (via spk_so_ref),
+           2) SO legacy di tspk (spk_is_so=1, via spk_so_ref),
+           3) fallback kebalikan: SO yang back-link ke SPK ini
+              (tsalesorder.so_spk_ref = nomor SPK) — dipakai SPK lama
+              yang dibuat sebelum kolom spk_so_ref terisi. */
+        DATE_FORMAT(COALESCE(
+          (SELECT so_dt.so_tanggal FROM tsalesorder so_dt
+            WHERE TRIM(so_dt.so_nomor) = TRIM(s.spk_so_ref) LIMIT 1),
+          (SELECT lg.spk_tanggal FROM tspk lg
+            WHERE lg.spk_is_so = 1 AND lg.spk_nomor LIKE 'SO-%'
+              AND TRIM(lg.spk_nomor) = TRIM(s.spk_so_ref) LIMIT 1),
+          (SELECT so_rv.so_tanggal FROM tsalesorder so_rv
+            WHERE TRIM(so_rv.so_spk_ref) = TRIM(s.spk_nomor) LIMIT 1)
+        ), '%Y-%m-%d') AS SO_Tanggal,
         s.spk_tanggal AS Tanggal,
         s.spk_dateline AS Dateline,
         DATE_FORMAT(s.spk_cmo_tanggal, '%Y-%m-%d %H:%i:%s') AS CMO_Tanggal,
@@ -192,7 +206,7 @@ const getBrowseList = async (filters = {}) => {
         "" AS Nomor,
         so.user_create AS MO, so.so_cmo AS CMO,
         DATE_FORMAT(so.so_tanggal, '%Y-%m-%d') AS SO_Tanggal,
-        DATE_FORMAT(so.so_tanggal, '%Y-%m-%d') AS Tanggal, 
+        NULL AS Tanggal, 
         DATE_FORMAT(so.so_dateline, '%Y-%m-%d') AS Dateline,
         DATE_FORMAT(so.so_cmo_tanggal, '%Y-%m-%d %H:%i:%s') AS CMO_Tanggal,
         so.so_statuskerja AS Kepentingan, v.divisi AS Divisi,
@@ -245,7 +259,7 @@ const getBrowseList = async (filters = {}) => {
         )
     ) x
     ${whereClause}
-    ORDER BY x.Tanggal DESC, x.SO DESC, x.Nomor DESC`;
+    ORDER BY COALESCE(x.Tanggal, x.SO_Tanggal) DESC, x.SO DESC, x.Nomor DESC`;
 
   const [rows] = await db.query(query, params);
   // Lengkapi URL gambar desain (prioritas MAP, fallback no. SO/SPK) supaya
@@ -258,25 +272,45 @@ const getBrowseList = async (filters = {}) => {
 };
 
 const getSizes = async (nomor) => {
-  const query = `
+  if (!nomor || nomor === "-") return [];
+
+  // 1. Coba ambil dari tspk_size (Data SPK)
+  const spkQuery = `
     SELECT 
       z.spks_nomor AS Nomor,
       z.spks_size AS Size,
       z.spks_qty AS Qty,
       IFNULL((
         SELECT SUM(d.stbjd_jumlah) FROM tstbj_dtl d
-        WHERE d.stbjd_spk_nomor=z.spks_nomor AND d.stbjd_size=z.spks_size
+        WHERE d.stbjd_spk_nomor = z.spks_nomor AND d.stbjd_size = z.spks_size
       ), 0) AS Stbj,
       (z.spks_qty - IFNULL((
         SELECT SUM(d.stbjd_jumlah) FROM tstbj_dtl d
-        WHERE d.stbjd_spk_nomor=z.spks_nomor AND d.stbjd_size=z.spks_size
+        WHERE d.stbjd_spk_nomor = z.spks_nomor AND d.stbjd_size = z.spks_size
       ), 0)) AS Kurang
     FROM tspk_size z
     WHERE z.spks_nomor = ?
     ORDER BY z.spks_size
   `;
-  const [rows] = await db.query(query, [nomor]);
-  return rows;
+  const [spkRows] = await db.query(spkQuery, [nomor]);
+  if (spkRows.length > 0) {
+    return spkRows;
+  }
+
+  // 2. Fallback: Jika belum ada di tspk_size, ambil dari tsalesorder_size (Data SO)
+  const soQuery = `
+    SELECT 
+      s.sos_so_nomor AS Nomor,
+      s.sos_size AS Size,
+      s.sos_qty AS Qty,
+      0 AS Stbj,
+      s.sos_qty AS Kurang
+    FROM tsalesorder_size s
+    WHERE s.sos_so_nomor = ? AND s.sos_qty > 0
+    ORDER BY s.sos_size
+  `;
+  const [soRows] = await db.query(soQuery, [nomor]);
+  return soRows;
 };
 
 const deleteSpk = async (nomor, userDetails) => {

@@ -2,8 +2,8 @@ const sublimService = require('../services/lhkSublim.service');
 
 const browseSublim = async (req, res) => {
     try {
-        const { startDate, endDate } = req.query;
-        const data = await sublimService.getAllHeaders(startDate, endDate);
+        const { startDate, endDate, keyword } = req.query;
+        const data = await sublimService.getAllHeaders(startDate, endDate, keyword);
         
         // PERBAIKAN: Dibungkus objek { data } demi standardisasi stand-alone / lookup data table di Vue
         res.status(200).json({ data });
