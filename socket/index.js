@@ -34,7 +34,11 @@ const initSocket = (httpServer, opts = {}) => {
     cors: {
       origin: (origin, callback) => {
         if (!origin) return callback(null, true);
-        if (!allowedOrigins.length || allowedOrigins.includes(origin)) {
+        const isLocal =
+          process.env.NODE_ENV !== "production" &&
+          (/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin) ||
+            /^http:\/\/192\.168\.\d+\.\d+(:\d+)?$/.test(origin));
+        if (!allowedOrigins.length || allowedOrigins.includes(origin) || isLocal) {
           return callback(null, true);
         }
         return callback(new Error("Not allowed by CORS"));
