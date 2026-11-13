@@ -270,7 +270,7 @@ const getPoDetailByNomor = async (nomor) => {
       d.pod_nourut AS no, d.pod_brg_kode AS kode, b.brg_nama AS nama,
       d.pod_keterangan AS namaext, d.pod_brg_satuan AS Satuan, d.pod_qty AS QTY,
       d.pod_qty_terima AS QtyBPB, d.pod_harga AS harga, d.pod_discpr AS diskon, d.pod_spk_nomor AS spk,
-      pod_qty * pod_harga * (1 - pod_discpr / 100) AS total
+      d.pod_qty * IF(IFNULL(d.pod_m2, 0) > 0, d.pod_m2, 1) * d.pod_harga * (1 - IFNULL(d.pod_discpr, 0) / 100) AS total
     FROM tpo_mmt_dtl d
     LEFT JOIN tbarang_mmt b ON d.pod_brg_kode = b.brg_kode
     WHERE d.pod_po_nomor = ? 
@@ -306,7 +306,7 @@ const getPOById = async (nomor) => {
       d.pod_mb_nomor AS mb_nomor, 
       COALESCE(b.brg_panjang, 0) AS panjang, 
       COALESCE(b.brg_lebar, 0) AS lebar,
-      d.pod_qty * d.pod_m2 * d.pod_harga * (1 - d.pod_discpr / 100) AS total
+      d.pod_qty * IF(IFNULL(d.pod_m2, 0) > 0, d.pod_m2, 1) * d.pod_harga * (1 - IFNULL(d.pod_discpr, 0) / 100) AS total
     FROM tpo_mmt_dtl d
     LEFT JOIN tbarang_mmt b ON d.pod_brg_kode = b.brg_kode
     LEFT JOIN tgarmen_brg t ON d.pod_brg_kode = t.brg_kode
