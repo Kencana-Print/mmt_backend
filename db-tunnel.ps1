@@ -12,7 +12,7 @@
 
 $plink = "C:\Program Files\HeidiSQL\plink.exe"
 if (-not (Test-Path $plink)) { $plink = "C:\Program Files (x86)\PuTTY\plink.exe" }
-$key    = "C:\DATA\Kencana\zainal.ppk"
+$key    = "D:\2026\Kencana\zainal.ppk"
 $sshUser = "zainal"
 $sshHost = "103.150.117.18"
 $localPort = 3308

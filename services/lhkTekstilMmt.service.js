@@ -211,6 +211,7 @@ const deleteLhk = async (nomor) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+
     await conn.query(
       "DELETE FROM tlhk_mesintekstil_dtl WHERE ltd_lth_nomor = ?",
       [nomor],
@@ -218,9 +219,22 @@ const deleteLhk = async (nomor) => {
     await conn.query("DELETE FROM tlhk_mesintekstil_hdr WHERE lth_nomor = ?", [
       nomor,
     ]);
-    await conn.query("DELETE FROM tmasterstok_mmt WHERE mst_noreferensi = ?", [
+    await conn.query(
+      "DELETE FROM tlhk_tekstilmmt_dtl WHERE ltd_lth_nomor = ?",
+      [nomor],
+    );
+    await conn.query("DELETE FROM tlhk_tekstilmmt_hdr WHERE lth_nomor = ?", [
       nomor,
     ]);
+    await conn.query(
+      "DELETE FROM tlhk_cetakmmt_ink WHERE lci_lch_nomor = ?",
+      [nomor],
+    );
+    await conn.query(
+      "DELETE FROM tmasterstok_mmt WHERE mst_noreferensi = ? OR mst_spk_nomor = ?",
+      [nomor, nomor],
+    );
+
     await conn.commit();
     return { success: true };
   } catch (error) {
@@ -296,6 +310,24 @@ const saveLhk = async (data) => {
 
     // 3. Insert atau Update Header
     if (isActuallyNew) {
+      // Cek duplikasi request paralel / double click saat PC hang
+      if (header.barcode_input) {
+        const [existing] = await conn.query(
+          `SELECT lth_nomor FROM tlhk_mesintekstil_hdr 
+           WHERE lth_barcode = ? 
+             AND lth_tanggal = ? 
+             AND lth_user_create = ? 
+             AND lth_date_create >= DATE_SUB(NOW(), INTERVAL 15 SECOND)
+           LIMIT 1`,
+          [header.barcode_input, header.tanggal, currentUser],
+        );
+        if (existing && existing.length > 0) {
+          throw new Error(
+            `Terdeteksi pengiriman ganda. LHK sudah tersimpan dengan nomor ${existing[0].lth_nomor}.`,
+          );
+        }
+      }
+
       const sqlInsHeader = `
         INSERT INTO tlhk_mesintekstil_hdr (
           lth_nomor, lth_tanggal, lth_shift, lth_gdg_prod, 

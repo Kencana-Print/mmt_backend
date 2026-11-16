@@ -2,6 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const lhkController = require('../controllers/lhkTekstilMmt.controller');
+const verifyToken = require('../middleware/auth.middleware');
 
 // --- 1. Static & Lookup Routes (Dahulukan) ---
 router.get('/', lhkController.getLhkList);
@@ -12,9 +13,9 @@ router.get('/approval-list', lhkController.getApprovalList); // Endpoint untuk h
 router.get('/details', lhkController.getLhkDetails); 
 
 // --- 2. Action Routes (POST/DELETE) ---
-router.post('/approve', lhkController.handleSaveApproval);
-router.post('/', lhkController.handleSaveLhk);
-router.delete('/:nomor', lhkController.removeLhk);
+router.post('/approve', verifyToken, lhkController.handleSaveApproval);
+router.post('/', verifyToken, lhkController.handleSaveLhk);
+router.delete('/:nomor', verifyToken, lhkController.removeLhk);
 
 // --- 3. Parameter Routes (Letakkan di Paling Bawah) ---
 router.get('/approval/:nomor', lhkController.getApprovalFullData); // Ambil detail history approval

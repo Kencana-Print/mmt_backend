@@ -43,11 +43,27 @@ const getLhkDetails = async (req, res) => {
 
 const removeLhk = async (req, res) => {
   try {
+    const userKode = String(
+      req.user?.kdUser || req.user?.kode || req.user?.user_kode || ""
+    ).toUpperCase();
+    const bagian = String(req.user?.bagian || "").toUpperCase();
+    const jabat = String(req.user?.jabat || "").toUpperCase();
+    const isUserAdmin =
+      userKode === "ADMIN" || bagian === "ADMIN" || jabat === "ADMIN";
+
+    if (!isUserAdmin) {
+      return res.status(403).json({
+        success: false,
+        message: "Akses ditolak: Hanya admin yang memiliki izin untuk menghapus data LHK.",
+      });
+    }
+
     const { nomor } = req.params;
     await lhkService.deleteLhk(nomor);
-    res.json({ message: "Berhasil dihapus." });
+    res.json({ success: true, message: "Berhasil dihapus." });
   } catch (error) {
-    res.status(500).json({ message: "Gagal Hapus." });
+    console.error("Error removeLhk:", error);
+    res.status(500).json({ success: false, message: error.message || "Gagal Hapus." });
   }
 };
 const handleSaveLhk = async (req, res) => {
@@ -73,7 +89,7 @@ const handleSaveLhk = async (req, res) => {
     console.error("Error Saving LHK:", error);
     res.status(500).json({
       success: false,
-      message: "Gagal menyimpan data LHK Tekstil.",
+      message: error.message || "Gagal menyimpan data LHK Tekstil.",
     });
   }
 };
