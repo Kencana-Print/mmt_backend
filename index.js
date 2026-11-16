@@ -118,66 +118,88 @@ const sjHasilMaklonRoutes = require("./routes/sjHasilMaklon.routes");
 
 const app = express();
 const allowedOrigins = [
-  "http://localhost:5173",
-  "http://localhost:8081",
-  "http://localhost:8082",
-  "http://127.0.0.1:8081",
-  "http://127.0.0.1:8082",
-  "http://103.150.117.18",
-  "https://103.150.117.18",
-  "http://103.94.238.252",
-  "http://103.94.238.252:88",
-  "http://192.168.1.191:5173",
-  "https://103.94.238.252",
+    "http://localhost:5173",
+    "http://localhost:8081",
+    "http://localhost:8082",
+    "http://127.0.0.1:8081",
+    "http://127.0.0.1:8082",
+    "http://103.150.117.18",
+    "https://103.150.117.18",
+    "http://103.94.238.252",
+    "http://103.94.238.252:88",
+    "http://192.168.1.191:5173",
+    "https://103.94.238.252",
+    "https://mmt.manksi.com",
+    "http://mmt.manksi.com",
 ];
+
+if (
+    process.env.FRONTEND_URL &&
+    !allowedOrigins.includes(process.env.FRONTEND_URL)
+) {
+    allowedOrigins.push(process.env.FRONTEND_URL);
+}
+if (process.env.ALLOWED_ORIGINS) {
+    process.env.ALLOWED_ORIGINS.split(",").forEach((o) => {
+        const trimmed = o.trim();
+        if (trimmed && !allowedOrigins.includes(trimmed)) {
+            allowedOrigins.push(trimmed);
+        }
+    });
+}
 
 // Folder dan direktori yang dibutuhkan
 app.use("/images", express.static(imageFolderPath));
 app.use("/file-gambar", express.static(imageFolderPath));
 const manksiUploads = path.join(
-  __dirname,
-  "..",
-  "MANKSI WEB",
-  "manksi_backend",
-  "public",
-  "uploads",
+    __dirname,
+    "..",
+    "MANKSI WEB",
+    "manksi_backend",
+    "public",
+    "uploads",
 );
 if (fs.existsSync(manksiUploads)) {
-  app.use("/uploads", express.static(manksiUploads));
+    app.use("/uploads", express.static(manksiUploads));
 }
 app.use(
-  "/uploads",
-  express.static(path.join(process.cwd(), "public", "uploads")),
+    "/uploads",
+    express.static(path.join(process.cwd(), "public", "uploads")),
 );
 const requiredDirs = [
-  path.join(process.cwd(), "temp"),
-  path.join(process.cwd(), "public"),
-  path.join(process.cwd(), "public", "images"),
-  path.join(process.cwd(), "public", "uploads"),
+    path.join(process.cwd(), "temp"),
+    path.join(process.cwd(), "public"),
+    path.join(process.cwd(), "public", "images"),
+    path.join(process.cwd(), "public", "uploads"),
 ];
 // Middleware
 app.use(
-  cors({
-    origin: function (origin, callback) {
-      if (!origin) return callback(null, true);
-      const isAllowed =
-        allowedOrigins.includes(origin) ||
-        /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(
-          origin
-        );
-      if (isAllowed) {
-        return callback(null, true);
-      } else {
-        console.warn("❌ CORS Blocked:", origin);
-        return callback(new Error("Not allowed by CORS"));
-      }
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    // X-Data-Mode: "real" | "trial" -> menentukan database yang dipakai.
-    allowedHeaders: ["Content-Type", "Authorization", "X-Data-Mode", "Accept"],
-    exposedHeaders: ["Content-Disposition"],
-    credentials: true,
-  }),
+    cors({
+        origin: function (origin, callback) {
+            if (!origin) return callback(null, true);
+            const isAllowed =
+                allowedOrigins.includes(origin) ||
+                /^http:\/\/(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+)(:\d+)?$/.test(
+                    origin,
+                );
+            if (isAllowed) {
+                return callback(null, true);
+            } else {
+                console.warn("❌ CORS Blocked:", origin);
+                return callback(new Error("Not allowed by CORS"));
+            }
+        },
+        methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        // X-Data-Mode: "real" | "trial" -> menentukan database yang dipakai.
+        allowedHeaders: [
+            "Content-Type",
+            "Authorization",
+            "X-Data-Mode",
+            "Accept",
+        ],
+        exposedHeaders: ["Content-Disposition"],
+        credentials: true,
+    }),
 );
 
 app.use(express.json());
@@ -190,10 +212,10 @@ app.disable("etag");
 app.use(dataModeMiddleware);
 
 requiredDirs.forEach((dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-    console.log(" Created directory:", dir);
-  }
+    if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+        console.log(" Created directory:", dir);
+    }
 });
 
 app.use("/api/auth", clientCertAuth, authRoutes);
@@ -204,29 +226,37 @@ app.use("/api/mmt/sj-hasil-maklon", clientCertAuth, sjHasilMaklonRoutes);
 app.use("/api/mmt/lhk-finishing", clientCertAuth, lhkFinishingRoutes);
 app.use("/api/mmt/laporan-stbj", clientCertAuth, stbjMmtRoutes);
 app.use(
-  "/api/mmt/laporan-ls-bahan-utama",
-  clientCertAuth,
-  lapLsBahanUtamaRoutes,
+    "/api/mmt/laporan-ls-bahan-utama",
+    clientCertAuth,
+    lapLsBahanUtamaRoutes,
 );
 app.use(
-  "/api/mmt/laporan-ls-bahan-penolong",
-  clientCertAuth,
-  lapLsBahanPenolongRoutes,
+    "/api/mmt/laporan-ls-bahan-penolong",
+    clientCertAuth,
+    lapLsBahanPenolongRoutes,
 );
 app.use("/api/mmt/laporan-spk-mmt", clientCertAuth, lapSpkMmtRoutes);
 app.use("/api/mmt/monitoring/laporan-lmkp", clientCertAuth, lapLmkpMmtRoutes);
 app.use("/api/mmt/monitoring-finishing", clientCertAuth, lapMonFinishingRoutes);
-app.use("/api/mmt/monitoring/laporan-finishing", clientCertAuth, lapMonFinishingRoutes);
+app.use(
+    "/api/mmt/monitoring/laporan-finishing",
+    clientCertAuth,
+    lapMonFinishingRoutes,
+);
 app.use("/api/mmt/monitoring-cetak", clientCertAuth, lapMonCetakRoutes);
 app.use("/api/mmt/monitoring/laporan-cetak", clientCertAuth, lapMonCetakRoutes);
 app.use("/api/mmt/monitoring-tekstil", clientCertAuth, lapMonTekstilRoutes);
-app.use("/api/mmt/monitoring/laporan-tekstil", clientCertAuth, lapMonTekstilRoutes);
+app.use(
+    "/api/mmt/monitoring/laporan-tekstil",
+    clientCertAuth,
+    lapMonTekstilRoutes,
+);
 app.use("/api/mmt/permintaan-bahan", clientCertAuth, permintaanBahanRoutes);
 app.use("/api/mmt/penerimaan-bahan", clientCertAuth, penerimaanBahanRoutes);
 app.use(
-  "/api/mmt/permintaan-produksi",
-  clientCertAuth,
-  permintaanProduksiRoutes,
+    "/api/mmt/permintaan-produksi",
+    clientCertAuth,
+    permintaanProduksiRoutes,
 );
 app.use("/api/supplier", clientCertAuth, supplierRoutes);
 app.use("/api/mmt/map", clientCertAuth, mapRoutes); // <- Ditambahkan di sini
@@ -244,14 +274,14 @@ app.use("/api/mmt/lookup-pabrik", clientCertAuth, lookupPabrikRoutes);
 app.use("/api/mmt/invoice", clientCertAuth, invoicePembelianRoutes);
 app.use("/api/mmt/customer", clientCertAuth, customerRoutes);
 app.use(
-  "/api/mmt/pengajuan-permintaan",
-  clientCertAuth,
-  pengajuanPermintaanRoutes,
+    "/api/mmt/pengajuan-permintaan",
+    clientCertAuth,
+    pengajuanPermintaanRoutes,
 );
 app.use(
-  "/api/mmt/permintaan-produksi-bahan",
-  clientCertAuth,
-  permintaanProduksiBahanRoutes,
+    "/api/mmt/permintaan-produksi-bahan",
+    clientCertAuth,
+    permintaanProduksiBahanRoutes,
 );
 app.use("/api/mmt/planning-produksi", clientCertAuth, planningProduksiRoutes);
 app.use("/api/mmt/lhk-tekstil-mmt", clientCertAuth, lhkTekstilMmtRoutes);
@@ -259,9 +289,9 @@ app.use("/api/mmt/lhk-proof", clientCertAuth, lhkProofRoutes);
 app.use("/api/mmt/lhk-cetak-mmt", clientCertAuth, lhkCetakMmtRoutes);
 app.use("/api/mmt/stok-opname", clientCertAuth, stokOpnameRoutes);
 app.use(
-  "/api/mmt/pelunasan-pembelian",
-  clientCertAuth,
-  pelunasanPembelianRoutes,
+    "/api/mmt/pelunasan-pembelian",
+    clientCertAuth,
+    pelunasanPembelianRoutes,
 );
 app.use("/api/mmt/mesin", clientCertAuth, mesinMmtRoutes);
 app.use("/api/master/bahan/obat", clientCertAuth, masterObatRoutes);
@@ -270,17 +300,17 @@ app.use("/api/mmt/master-obatt", clientCertAuth, masterObatRoutes);
 app.use("/api/mmt/laporan-ls-tinta", clientCertAuth, lapLsTintaRoutes);
 app.use("/api/mmt/retur-produksi", clientCertAuth, returProduksiRoutes);
 app.use(
-  "/api/mmt/penerimaan-po-ext-mmt",
-  clientCertAuth,
-  penerimaanPoExtMmtRoutes,
+    "/api/mmt/penerimaan-po-ext-mmt",
+    clientCertAuth,
+    penerimaanPoExtMmtRoutes,
 );
 app.use("/api/mmt/retur-beli", clientCertAuth, returBeliRoutes);
 app.use("/api/mmt/po-external-mmt", clientCertAuth, poExtMmtRoutes);
 app.use("/api/mmt/stbj", clientCertAuth, stbjRoutes);
 app.use(
-  "/api/mmt/lap-pemakaian-bahan",
-  clientCertAuth,
-  lapPemakaianBahanRoutes,
+    "/api/mmt/lap-pemakaian-bahan",
+    clientCertAuth,
+    lapPemakaianBahanRoutes,
 );
 app.use("/api/mmt/mutasi-gudang", clientCertAuth, mutasiGudangRoutes);
 app.use("/api/mmt/search-barcode", clientCertAuth, searchBarcodeRoutes);
@@ -292,14 +322,14 @@ app.use("/api/mmt/po-internal", clientCertAuth, poInternalRoutes);
 app.use("/api/mmt/lhk-sublim", clientCertAuth, lhkSublimRoutes);
 app.use("/api/mmt/lhk-paperprint", clientCertAuth, lhkPaperprintRoutes);
 app.use(
-  "/api/mmt/monitoring-paperprint",
-  clientCertAuth,
-  lapMonPaperprintRoutes,
+    "/api/mmt/monitoring-paperprint",
+    clientCertAuth,
+    lapMonPaperprintRoutes,
 );
 app.use(
-  "/api/mmt/monitoring/laporan-paperprint",
-  clientCertAuth,
-  lapMonPaperprintRoutes,
+    "/api/mmt/monitoring/laporan-paperprint",
+    clientCertAuth,
+    lapMonPaperprintRoutes,
 );
 app.use("/api/mmt/monitoring-sublim", clientCertAuth, lapMonSublimRoutes);
 app.use("/api/mmt/dashboard", clientCertAuth, dashboardRoutes);
@@ -312,9 +342,9 @@ app.use("/api/mmt/mutasi-internal", clientCertAuth, mutasiInternalRoutes);
 app.use("/api/mmt/laporan-bs", clientCertAuth, lapMonBSRoutes);
 app.use("/api/spanduk/mutasi-bahan", clientCertAuth, mutasiBahanRoutes);
 app.use(
-  "/api/spanduk/permintaan-bahan",
-  clientCertAuth,
-  permintaanBahanSpandukRoutes,
+    "/api/spanduk/permintaan-bahan",
+    clientCertAuth,
+    permintaanBahanSpandukRoutes,
 );
 app.use("/api/spanduk/master-bahan", clientCertAuth, masterBahanSpandukRoutes);
 app.use("/api/spanduk/lhk-cetak", clientCertAuth, lhkCetakSpandukRoutes);
@@ -324,14 +354,14 @@ app.use("/api/spanduk/lhk-quiring", clientCertAuth, lhkQuiringSpandukRoutes);
 app.use("/api/spanduk/lhk-proof", clientCertAuth, lhkProofSpandukRoutes);
 app.use("/api/spanduk/lhk-afdruk", clientCertAuth, lhkAfdrukSpandukRoutes);
 app.use(
-  "/api/spanduk/lhk-hapus-plangkan",
-  clientCertAuth,
-  lhkHapusPlangkanSpandukRoutes,
+    "/api/spanduk/lhk-hapus-plangkan",
+    clientCertAuth,
+    lhkHapusPlangkanSpandukRoutes,
 );
 app.use(
-  "/api/spanduk/lhk-design-proof",
-  clientCertAuth,
-  lhkDesignProofSpandukRoutes,
+    "/api/spanduk/lhk-design-proof",
+    clientCertAuth,
+    lhkDesignProofSpandukRoutes,
 );
 app.use("/api/spanduk/rekap-lhk", clientCertAuth, rekapLhkSpandukRoutes);
 app.use("/api/spanduk/lhk-plotter", clientCertAuth, lhkPlotterSpandukRoutes);
@@ -342,20 +372,20 @@ app.use("/api/spanduk/mon-lipat", clientCertAuth, monLipatSpandukRoutes);
 app.use("/api/spanduk/mon-cuiring", clientCertAuth, monCuiringSpandukRoutes);
 app.use("/api/spanduk/mon-plotter", clientCertAuth, monPlotterSpandukRoutes);
 app.use(
-  "/api/spanduk/mon-hapus-plangkan",
-  clientCertAuth,
-  monHapusPlangkanSpandukRoutes,
+    "/api/spanduk/mon-hapus-plangkan",
+    clientCertAuth,
+    monHapusPlangkanSpandukRoutes,
 );
 app.use(
-  "/api/spanduk/penerimaan-bahan",
-  clientCertAuth,
-  penerimaanBahanPenolongRoutes,
+    "/api/spanduk/penerimaan-bahan",
+    clientCertAuth,
+    penerimaanBahanPenolongRoutes,
 );
 app.use("/api/mmt/lap-kartu-stok", clientCertAuth, lapKartuStokMmtRoutes);
 app.use(
-  "/api/mmt/lap-mon-jadwalkirim",
-  clientCertAuth,
-  lapMonJadwalKirimRoutes,
+    "/api/mmt/lap-mon-jadwalkirim",
+    clientCertAuth,
+    lapMonJadwalKirimRoutes,
 );
 app.use("/api/mmt/so-spk", clientCertAuth, soToSpkRoutes);
 app.use("/api/mmt/sales-order", clientCertAuth, salesOrderRoutes);
@@ -365,9 +395,9 @@ app.use("/api/mmt/manage-user", clientCertAuth, manageUserRoutes);
 app.use("/api/mmt/surat-jalan-map", clientCertAuth, suratJalanMapRoutes);
 app.use("/api/mmt/bast-map", clientCertAuth, bastMapRoutes);
 app.use(
-  "/api/mmt/pengajuan-koreksi-stok",
-  clientCertAuth,
-  pengajuanKoreksiStokRoutes,
+    "/api/mmt/pengajuan-koreksi-stok",
+    clientCertAuth,
+    pengajuanKoreksiStokRoutes,
 );
 app.use("/api/mmt/komitmen-kirim", clientCertAuth, komitmenKirimRoutes);
 app.use("/api/mmt/relationship-map", clientCertAuth, relationshipMapMmtRoutes);
@@ -382,5 +412,5 @@ app.set("io", io);
 
 // Jalankan server
 httpServer.listen(port, () => {
-  console.log(`⚡️[server]: Server berjalan di http://localhost:${port}`);
+    console.log(`⚡️[server]: Server berjalan di http://localhost:${port}`);
 });
