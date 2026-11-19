@@ -52,12 +52,18 @@ const checkPermission = (menuId, action) => {
     try {
       // Hak akses adalah konfigurasi global: selalu dibaca dari DB real,
       // supaya user tetap bisa membuka menu saat memakai MODE TRIAL.
+      // ponytail: ARDANP4 inherits menu permissions from ARDAN
+      const targetUser =
+        String(userKode || "").trim().toUpperCase() === "ARDANP4"
+          ? "ARDAN"
+          : userKode;
+
       const [rows] = await runWithDataMode(DATA_MODE.REAL, () =>
         pool.query(
           `SELECT MAX(${column}) AS allowed
            FROM thakuser
            WHERE hak_user_kode = ? AND hak_men_id = ?`,
-          [userKode, menuId],
+          [targetUser, menuId],
         ),
       );
 

@@ -601,6 +601,10 @@ exports.getMutasiData = async (startDate, endDate, userLogin) => {
     // Browse hanya menampilkan dokumen yang dibuat oleh user yang login.
     // Contoh: ARDAN hanya melihat dokumen user_create ARDAN, ESTI hanya ESTI.
     const userFilter = String(userLogin || "").trim().toUpperCase();
+    // ponytail: ARDAN & ARDANP4 share mutasi internal visibility
+    const userList = ["ARDAN", "ARDANP4"].includes(userFilter)
+      ? ["ARDAN", "ARDANP4"]
+      : [userFilter];
 
     // UNION dengan tmutasi_hdr agar dokumen lama (sebelum perpindahan
     // tabel) tetap muncul di browse. Nomor yang sudah ada di tabel
@@ -629,7 +633,7 @@ exports.getMutasiData = async (startDate, endDate, userLogin) => {
             )
           )
           AND h.mph_tanggal BETWEEN ? AND ?
-          AND UPPER(TRIM(h.user_create)) = ?
+          AND UPPER(TRIM(h.user_create)) IN (?)
 
         UNION ALL
 
@@ -649,7 +653,7 @@ exports.getMutasiData = async (startDate, endDate, userLogin) => {
         FROM tmutasi_hdr h
         WHERE h.mut_nomor LIKE 'MMT.MUT.%'
           AND h.mut_tanggal BETWEEN ? AND ?
-          AND UPPER(TRIM(h.user_create)) = ?
+          AND UPPER(TRIM(h.user_create)) IN (?)
           AND NOT EXISTS (
             SELECT 1 FROM tmutasiproduksi_hdr p
             WHERE p.mph_nomor = h.mut_nomor
@@ -661,10 +665,10 @@ exports.getMutasiData = async (startDate, endDate, userLogin) => {
     const [masterResults] = await pool.query(sqlMaster, [
       startDate,
       endDate,
-      userFilter,
+      userList,
       startDate,
       endDate,
-      userFilter,
+      userList,
     ]);
     return masterResults;
   } catch (error) {

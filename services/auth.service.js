@@ -44,13 +44,16 @@ const loginUser = async (username, password) => {
     // =========================
     // PAYLOAD JWT
     // =========================
+    // ponytail: ARDANP4 mirror ARDAN (divisi 1 MMT, cab P05)
+    const isArdanP4 = String(user.user_kode || "").trim().toUpperCase() === "ARDANP4";
+
     const userPayload = {
         kdUser: user.user_kode,
         nmUser: user.user_nama,
         bagian: user.user_bagian,
         jabat: user.user_jabat,
-        divisi: user.user_divisi, // Digunakan di Controller
-        cab: user.user_cab,
+        divisi: isArdanP4 ? 1 : user.user_divisi, // Digunakan di Controller
+        cab: isArdanP4 ? "P05" : user.user_cab,
         user_manager: user.user_manager, // Digunakan di Controller
     };
 
