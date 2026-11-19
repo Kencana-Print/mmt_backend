@@ -277,13 +277,17 @@ const generateNewNomor = async (date, connection = null) => {
 const saveLhk = async (data) => {
   const { header, details } = data;
   const conn = await pool.getConnection();
+  const currentUser = header.user || "SYSTEM";
+  const lockKey = `lhk_save_lock_${currentUser}_${header.barcode_input || header.brg_kode || "general"}`;
 
   try {
+    // 0. Named lock untuk mengantrekan request paralel saat user lag / multi-click
+    await conn.query("SELECT GET_LOCK(?, 10)", [lockKey]);
+
     await conn.beginTransaction();
     let nomorLhk = header.nomor;
     let isActuallyNew = false;
     const currentStatus = header.lstatus || "DRAFT";
-    const currentUser = header.user || "SYSTEM";
 
     // 1. Cek / Generate Nomor LHK
     if (!nomorLhk || nomorLhk === "AUTO") {
@@ -311,21 +315,28 @@ const saveLhk = async (data) => {
     // 3. Insert atau Update Header
     if (isActuallyNew) {
       // Cek duplikasi request paralel / double click saat PC hang
-      if (header.barcode_input) {
-        const [existing] = await conn.query(
-          `SELECT lth_nomor FROM tlhk_mesintekstil_hdr 
+      const duplicateSql = header.barcode_input
+        ? `SELECT lth_nomor FROM tlhk_mesintekstil_hdr 
            WHERE lth_barcode = ? 
              AND lth_tanggal = ? 
              AND lth_user_create = ? 
-             AND lth_date_create >= DATE_SUB(NOW(), INTERVAL 15 SECOND)
-           LIMIT 1`,
-          [header.barcode_input, header.tanggal, currentUser],
+             AND lth_date_create >= DATE_SUB(NOW(), INTERVAL 30 SECOND)
+           LIMIT 1`
+        : `SELECT lth_nomor FROM tlhk_mesintekstil_hdr 
+           WHERE lth_brg_kode = ? 
+             AND lth_tanggal = ? 
+             AND lth_user_create = ? 
+             AND lth_date_create >= DATE_SUB(NOW(), INTERVAL 30 SECOND)
+           LIMIT 1`;
+      const duplicateParams = header.barcode_input
+        ? [header.barcode_input, header.tanggal, currentUser]
+        : [header.brg_kode, header.tanggal, currentUser];
+
+      const [existing] = await conn.query(duplicateSql, duplicateParams);
+      if (existing && existing.length > 0) {
+        throw new Error(
+          `Terdeteksi pengiriman ganda. LHK sudah tersimpan dengan nomor ${existing[0].lth_nomor}.`,
         );
-        if (existing && existing.length > 0) {
-          throw new Error(
-            `Terdeteksi pengiriman ganda. LHK sudah tersimpan dengan nomor ${existing[0].lth_nomor}.`,
-          );
-        }
       }
 
       const sqlInsHeader = `
@@ -582,6 +593,9 @@ const saveLhk = async (data) => {
     console.error("Error pada saveLhk Mesin Tekstil:", error);
     throw error;
   } finally {
+    try {
+      await conn.query("SELECT RELEASE_LOCK(?)", [lockKey]);
+    } catch (_) {}
     conn.release();
   }
 };

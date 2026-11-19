@@ -2,3 +2,4 @@
 /node_modules
 index.js
 service/auth.service.js
+.opencode
