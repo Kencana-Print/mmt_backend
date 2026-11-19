@@ -15,7 +15,12 @@ exports.getPermintaanBahan = async (req, res) => {
     // ==========================================================
     // 🌟 PERBAIKAN DI SINI: Sesuaikan dengan nama properti di JWT Payload
     // ==========================================================
-    const divisi = req.user.divisi;
+    const userDivisi = req.user.divisi;
+    // Jika user.divisi == 0 (admin / umum), izinkan divisi dari query param atau default ke 1
+    const divisi =
+      userDivisi !== 0 && userDivisi !== undefined && userDivisi !== null
+        ? userDivisi
+        : Number(req.query.divisi) || 1;
     const userManager = req.user.user_manager || 0;
 
     // INGAT: Di auth.service namanya 'bagian', bukan 'user_bagian'

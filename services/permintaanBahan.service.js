@@ -127,12 +127,14 @@ exports.getPermintaanBahanData = async (
              WHERE pod.pod_mb_nomor = t1.mb_nomor) AS Tanggal_Datang
         `;
 
-    // PERBAIKAN: Logika IF diubah agar finance dan audit bisa mengakses data MMT
+    // PERBAIKAN: Logika IF diubah agar finance, audit, dan admin bisa mengakses data MMT
     if (
       divisi == 1 ||
       (userManager == 1 && divisi != 4) ||
       userBagian === "finance" ||
-      userBagian === "audit"
+      userBagian === "audit" ||
+      userBagian === "admin" ||
+      userBagian === "edp"
     ) {
       sqlMaster = `
                 SELECT
