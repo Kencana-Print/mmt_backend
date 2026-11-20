@@ -1,8 +1,20 @@
 // controllers/sjHasilMaklon.controller.js
 const service = require('../services/sjHasilMaklon.service');
 
-const getUserCabang = (req) =>
-  req.user?.cabang ?? req.user?.cab ?? req.user?.Cab ?? null;
+const getUserCabang = (req) => {
+  const u = req.user;
+  const kode = String(u?.kode || u?.kdUser || u?.username || "").trim().toUpperCase();
+  const bagian = String(u?.bagian || u?.user_bagian || "").trim().toUpperCase();
+  const cab = String(u?.cabang || u?.cab || "").trim().toUpperCase();
+  const isAdmin =
+    kode === "ADMIN" ||
+    kode === "ESTI" ||
+    bagian === "ADMIN" ||
+    cab === "HO" ||
+    u?.divisi === 0;
+  if (isAdmin) return null;
+  return req.user?.cabang ?? req.user?.cab ?? req.user?.Cab ?? null;
+};
 
 exports.getOutstanding = async (req, res) => {
   try {

@@ -456,6 +456,7 @@ const io = initSocket(httpServer, { allowedOrigins });
 app.set("io", io);
 
 // Jalankan server
+// Server restarted for routes update
 httpServer.listen(port, () => {
     console.log(`⚡️[server]: Server berjalan di http://localhost:${port}`);
 });

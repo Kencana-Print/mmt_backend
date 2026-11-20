@@ -3,8 +3,20 @@ const maklonBarangService = require('../services/maklonBarang.service');
 
 // Cabang user yang login — JWT MMT membawa field "cab" (dari tuser.user_cab),
 // middleware verifyToken menormalisasikannya menjadi "cabang" (pola bastMap).
-const getUserCabang = (req) =>
-  req.user?.cabang ?? req.user?.cab ?? req.user?.Cab ?? null;
+const getUserCabang = (req) => {
+  const u = req.user;
+  const kode = String(u?.kode || u?.kdUser || u?.username || "").trim().toUpperCase();
+  const bagian = String(u?.bagian || u?.user_bagian || "").trim().toUpperCase();
+  const cab = String(u?.cabang || u?.cab || "").trim().toUpperCase();
+  const isAdmin =
+    kode === "ADMIN" ||
+    kode === "ESTI" ||
+    bagian === "ADMIN" ||
+    cab === "HO" ||
+    u?.divisi === 0;
+  if (isAdmin) return null;
+  return req.user?.cabang ?? req.user?.cab ?? req.user?.Cab ?? null;
+};
 
 // GET /browse?startDate=&endDate=&keyword=&cab=&semuaCabang=
 exports.getBrowse = async (req, res) => {
