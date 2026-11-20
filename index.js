@@ -7,9 +7,8 @@ const path = require("path");
 const clientCertAuth = require("./middleware/clientCertAuth");
 const dataModeMiddleware = require("./middleware/dataMode.middleware");
 const { initSocket } = require("./socket");
-const imageFolderPath = "/mnt/image";
-
 require("dotenv").config();
+const imageFolderPath = process.env.IMAGE_FOLDER_PATH || "/mnt/image";
 
 const authRoutes = require("./routes/auth.routes");
 const lhkMesinCetakRoutes = require("./routes/lhkMesinCetak.routes");
@@ -149,8 +148,54 @@ if (process.env.ALLOWED_ORIGINS) {
 }
 
 // Folder dan direktori yang dibutuhkan
+app.use("/images", express.static(path.join(process.cwd(), "public", "images")));
 app.use("/images", express.static(imageFolderPath));
+app.use("/file-gambar", express.static(path.join(process.cwd(), "public", "images")));
 app.use("/file-gambar", express.static(imageFolderPath));
+
+// Fallback remote media server jika file fisik tidak ada di disk lokal
+const mediaServerUrl = (process.env.MEDIA_SERVER_URL || "https://manksi.com").replace(/\/+$/, "");
+const mediaFallback = async (req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    try {
+        const remoteUrl = `${mediaServerUrl}${req.baseUrl}${req.path}`;
+        const resp = await fetch(remoteUrl, { method: req.method, signal: AbortSignal.timeout(3000) });
+        if (resp.ok) {
+            const ct = resp.headers.get("content-type");
+            if (ct) res.setHeader("Content-Type", ct);
+            const buf = await resp.arrayBuffer();
+            return res.send(Buffer.from(buf));
+        }
+    } catch (_) {}
+    next();
+};
+app.use("/images", mediaFallback);
+app.use("/file-gambar", mediaFallback);
+
+// Proxy image eksternal (misal kaosanofficial / retail)
+app.get(["/api/proxy-image", "/proxy-image"], async (req, res) => {
+    const imageUrl = req.query.url;
+    if (!imageUrl || (!imageUrl.startsWith("https://retail.kaosanofficial.com") && !imageUrl.startsWith("http://retail.kaosanofficial.com"))) {
+        return res.status(400).send("URL tidak valid.");
+    }
+    try {
+        const resp = await fetch(imageUrl, {
+            headers: {
+                Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+            signal: AbortSignal.timeout(6000),
+        });
+        const contentType = resp.headers.get("content-type") || "";
+        if (!contentType.startsWith("image/")) {
+            return res.status(404).send("Gambar tidak ditemukan.");
+        }
+        res.setHeader("Content-Type", contentType);
+        const buf = await resp.arrayBuffer();
+        return res.send(Buffer.from(buf));
+    } catch (_) {
+        return res.status(404).send("Gagal mengambil gambar.");
+    }
+});
 const manksiUploads = path.join(
     __dirname,
     "..",

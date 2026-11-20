@@ -6,22 +6,29 @@ const path = require("path");
 // ============================================================
 // HELPER: Menyusun URL Gambar Desain
 // Prioritas: MAP > Nomor SO/SPK
-// Hanya return URL jika file benar-benar ada di disk.
 // ============================================================
 const resolveImageUrl = (cabang, mapNomor, soNomor) => {
-  const mediaBase = process.env.MEDIA_SERVER_URL || "https://manksi.com";
-  const cab = (cabang || "P05").trim();
+  const cab = (cabang || "P05").trim().toUpperCase();
   const map = (mapNomor || "").trim();
   const nomor = (soNomor || "").trim();
-  const base = path.join(process.cwd(), "public", "images");
+  const imageFolder = process.env.IMAGE_FOLDER_PATH || "/mnt/image";
+  const publicImages = path.join(process.cwd(), "public", "images");
+
+  const check = (rel) =>
+    fs.existsSync(path.join(publicImages, rel)) ||
+    fs.existsSync(path.join(imageFolder, rel));
 
   if (map) {
-    if (fs.existsSync(path.join(base, cab, "map", `${map}.jpg`)))
-      return `${mediaBase}/images/${cab}/map/${map}.jpg`;
+    if (check(path.join(cab, "map", `${map}.jpg`))) return `/images/${cab}/map/${encodeURIComponent(map)}.jpg`;
+    if (check(path.join("map", `${map}.jpg`))) return `/images/map/${encodeURIComponent(map)}.jpg`;
+    if (check(path.join(cab, `${map}.jpg`))) return `/images/${cab}/${encodeURIComponent(map)}.jpg`;
+    if (check(`${map}.jpg`)) return `/file-gambar/${encodeURIComponent(map)}.jpg`;
+    return `/images/${cab}/map/${encodeURIComponent(map)}.jpg`;
   }
   if (nomor) {
-    if (fs.existsSync(path.join(base, cab, `${nomor}.jpg`)))
-      return `${mediaBase}/images/${cab}/${nomor}.jpg`;
+    if (check(path.join(cab, `${nomor}.jpg`))) return `/images/${cab}/${encodeURIComponent(nomor)}.jpg`;
+    if (check(`${nomor}.jpg`)) return `/file-gambar/${encodeURIComponent(nomor)}.jpg`;
+    return `/images/${cab}/${encodeURIComponent(nomor)}.jpg`;
   }
   return null;
 };

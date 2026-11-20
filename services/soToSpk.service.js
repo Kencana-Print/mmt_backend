@@ -6,24 +6,37 @@ const path = require("path");
 
 // ============================================================
 // HELPER: Menyusun URL Gambar Desain (selaras salesOrder.service.js)
-// Prioritas: MAP > Nomor SO/SPK
-// Hanya return URL jika file benar-benar ada di disk.
+// Prioritas: MAP > Nomor SO/SPK > Minta Harga
 // ============================================================
-const resolveImageUrl = (cabang, mapNomor, soNomor) => {
-  const mediaBase = process.env.MEDIA_SERVER_URL || "https://manksi.com";
-  const cab = (cabang || "P05").trim();
+const resolveImageUrl = (cabang, mapNomor, soNomor, mhNomor) => {
+  const cab = (cabang || "P05").trim().toUpperCase();
   const map = (mapNomor || "").trim();
   const nomor = (soNomor || "").trim();
-  const base = path.join(process.cwd(), "public", "images");
+  const mh = (mhNomor || "").trim();
+  const imageFolder = process.env.IMAGE_FOLDER_PATH || "/mnt/image";
+  const publicImages = path.join(process.cwd(), "public", "images");
+
+  const check = (rel) =>
+    fs.existsSync(path.join(publicImages, rel)) ||
+    fs.existsSync(path.join(imageFolder, rel));
 
   if (map) {
-    if (fs.existsSync(path.join(base, cab, "map", `${map}.jpg`)))
-      return `${mediaBase}/images/${cab}/map/${map}.jpg`;
+    if (check(path.join(cab, "map", `${map}.jpg`))) return `/images/${cab}/map/${encodeURIComponent(map)}.jpg`;
+    if (check(path.join("map", `${map}.jpg`))) return `/images/map/${encodeURIComponent(map)}.jpg`;
+    if (check(path.join(cab, `${map}.jpg`))) return `/images/${cab}/${encodeURIComponent(map)}.jpg`;
+    if (check(`${map}.jpg`)) return `/file-gambar/${encodeURIComponent(map)}.jpg`;
   }
   if (nomor) {
-    if (fs.existsSync(path.join(base, cab, `${nomor}.jpg`)))
-      return `${mediaBase}/images/${cab}/${nomor}.jpg`;
+    if (check(path.join(cab, `${nomor}.jpg`))) return `/images/${cab}/${encodeURIComponent(nomor)}.jpg`;
+    if (check(`${nomor}.jpg`)) return `/file-gambar/${encodeURIComponent(nomor)}.jpg`;
   }
+  if (mh) {
+    if (check(path.join("mintaharga", `${mh}.jpg`))) return `/file-gambar/mintaharga/${encodeURIComponent(mh)}.jpg`;
+    if (check(`${mh}.jpg`)) return `/file-gambar/${encodeURIComponent(mh)}.jpg`;
+  }
+  if (map) return `/images/${cab}/map/${encodeURIComponent(map)}.jpg`;
+  if (nomor) return `/images/${cab}/${encodeURIComponent(nomor)}.jpg`;
+  if (mh) return `/file-gambar/mintaharga/${encodeURIComponent(mh)}.jpg`;
   return null;
 };
 
@@ -630,7 +643,10 @@ const getDetail = async (nomor) => {
               NULLIF(TRIM(legacy_so.spk_repeat), ''), 
               ''
             ) AS spk_repeat,
-            j.jo_nama, a.sal_nama, p.perush_nama, c.cus_nama, c.cus_perfect
+            j.jo_nama, a.sal_nama, p.perush_nama, c.cus_nama, c.cus_perfect,
+            m.mspk_mh_nomor AS spk_mh_nomor,
+            m.mspk_referensi AS spk_map_referensi,
+            m.mspk_cab AS spk_map_cab
      FROM tspk s
      LEFT JOIN tsalesorder so ON so.so_nomor = s.spk_so_ref
      LEFT JOIN tspk legacy_so ON legacy_so.spk_nomor = s.spk_so_ref AND legacy_so.spk_is_so = 1
@@ -638,10 +654,22 @@ const getDetail = async (nomor) => {
      LEFT JOIN tsales a ON s.spk_sal_kode = a.sal_kode
      LEFT JOIN tperusahaan p ON s.spk_perush_kode = p.perush_kode
      LEFT JOIN tcustomer c ON s.spk_cus_kode = c.cus_kode
+     LEFT JOIN tmemospk m ON m.mspk_nomor = s.spk_memo
      WHERE s.spk_nomor = ? AND s.spk_is_so = 0`,
     [nomor],
   );
   if (header.length === 0) throw new Error("Data SPK PPIC tidak ditemukan.");
+
+  const h = header[0];
+  const hCab = (h.spk_cab || h.spk_map_cab || "HO-").trim().toUpperCase();
+  const hMap = (h.spk_memo || "").trim();
+  const hMh = (h.spk_mh_nomor || "").trim();
+  const hRef = (h.spk_map_referensi || "").trim();
+  const hSo = (h.spk_so_ref || h.spk_nomor || "").trim();
+
+  h.image_url =
+    resolveImageUrl(hCab, hMap, hSo, hMh) ||
+    (hRef ? resolveImageUrl(hCab, hRef, "", "") : null);
 
   const isPremium = isPremiumWorkshop(header[0].spk_cab);
 

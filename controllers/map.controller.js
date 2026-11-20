@@ -169,7 +169,8 @@ const uploadFile = async (req, res) => {
   try {
     const { nomor } = req.params;
     const { type } = req.body; // MAIN, PO, atau ACC
-    const cabang = req.user?.cabang || "DEFAULT";
+    const cabang =
+      req.body.cabang || req.user?.cab || req.user?.cabang || "DEFAULT";
 
     if (!req.file) {
       return res

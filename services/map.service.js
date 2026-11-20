@@ -321,7 +321,7 @@ const getBrowseList = async (
       x.mspk_jumlah AS Jumlah, x.mspk_jumlah_kirim AS Kirim, ${custCol}
       x.mspk_rencana_order AS Rencana, x.mspk_tipe AS Tipe, ${hargaCol}
       s.sal_nama AS Salesman, x.date_create AS Created, 
-      x.mspk_revisi_no AS Revisi, x.mspk_referensi AS NoReferensi,
+      x.mspk_revisi_no AS Revisi, x.mspk_referensi AS NoReferensi, x.mspk_mh_nomor AS MH,
       IF(x.mspk_estimasijadi="1899-12-30", "", DATE_FORMAT(x.mspk_estimasijadi, '%Y-%m-%d')) AS EstimasiJadi, 
       x.mspk_close AS CloseStatus,
       IFNULL(
@@ -952,6 +952,19 @@ const processImage = async (tempFilePath, cabang, type, mapNomor, mimetype) => {
   if (!fs.existsSync(tempFilePath))
     throw new Error("File sumber sementara tidak ditemukan.");
 
+  let targetCabang = (cabang || "").trim().toUpperCase();
+  if (!targetCabang || targetCabang === "DEFAULT") {
+    try {
+      const [mapRows] = await db.query(
+        "SELECT mspk_cab FROM tmemospk WHERE mspk_nomor = ? LIMIT 1",
+        [mapNomor],
+      );
+      targetCabang = (mapRows[0]?.mspk_cab || "HO-").trim().toUpperCase();
+    } catch (_) {
+      targetCabang = "HO-";
+    }
+  }
+
   const isPdf = mimetype === "application/pdf";
   const ext = isPdf ? "pdf" : "jpg";
 
@@ -964,7 +977,7 @@ const processImage = async (tempFilePath, cabang, type, mapNomor, mimetype) => {
     process.cwd(),
     "public",
     "images",
-    cabang,
+    targetCabang,
     "map",
   );
   if (!fs.existsSync(branchFolderPath)) {
@@ -1040,7 +1053,28 @@ const getPrintData = async (nomor) => {
   `;
   const [rows] = await db.query(query, [nomor]);
   if (rows.length === 0) return null;
-  return rows[0];
+
+  const data = rows[0];
+  const cab = String(data.mspk_cab || "HO-").trim().toUpperCase();
+  const mhNomor = String(data.mspk_mh_nomor || "").trim();
+  const referensi = String(data.mspk_referensi || "").trim();
+
+  const checkLocal = (rel) =>
+    fs.existsSync(path.join(process.cwd(), "public", "images", rel));
+
+  if (checkLocal(`${cab}/map/${nomor}.jpg`)) {
+    data.image_url = `/images/${cab}/map/${encodeURIComponent(nomor)}.jpg`;
+  } else if (referensi && checkLocal(`${cab}/map/${referensi}.jpg`)) {
+    data.image_url = `/images/${cab}/map/${encodeURIComponent(referensi)}.jpg`;
+  } else if (mhNomor) {
+    data.image_url = `/file-gambar/mintaharga/${encodeURIComponent(mhNomor)}.jpg`;
+  } else if (referensi) {
+    data.image_url = `/images/${cab}/map/${encodeURIComponent(referensi)}.jpg`;
+  } else {
+    data.image_url = `/images/${cab}/map/${encodeURIComponent(nomor)}.jpg`;
+  }
+
+  return data;
 };
 
 // ==========================================
