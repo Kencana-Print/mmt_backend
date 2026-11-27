@@ -553,6 +553,10 @@ const getBastDetail = async (nomor) => {
        m.mspk_jumlah_jadi AS JumlahJadi,
        m.mspk_tipe AS Tipe,
        m.mspk_cab AS Cabang,
+       m.mspk_cab2 AS Cabang2,
+       m.mspk_referensi AS Referensi,
+       m.mspk_mh_nomor AS MhNomor,
+       m.Mspk_image AS Image,
        m.mspk_workshop AS Workshop,
        m.mspk_sublim AS Sublim
      FROM tmemospk m
@@ -683,6 +687,10 @@ const getBastDetail = async (nomor) => {
       : (map.JumlahJadi ?? map.Jumlah ?? 0),
     mmpt_tipe: map.Tipe || "Standard",
     mmpt_cabang: map.Cabang,
+    mmpt_cabang2: map.Cabang2,
+    mmpt_referensi: map.Referensi,
+    mmpt_mh_nomor: map.MhNomor,
+    mmpt_image: map.Image,
     mmpt_workshop: map.Workshop,
     mmpt_sublim: map.Sublim,
     mmpt_proof_number: proofNumbers.join(", "),
