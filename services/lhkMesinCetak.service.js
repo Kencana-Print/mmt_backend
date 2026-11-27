@@ -936,6 +936,9 @@ const deleteLhk = async (nomor) => {
   const conn = await pool.getConnection();
   try {
     await conn.beginTransaction();
+    await conn.query("DELETE FROM tmasterstok_mmt WHERE mst_noreferensi = ?", [
+      nomor,
+    ]);
     await conn.query("DELETE FROM tlhk_mesin_dtl WHERE ld_lnomor = ?", [nomor]);
     await conn.query("DELETE FROM tlhk_mesin_hdr WHERE lnomor = ?", [nomor]);
 
